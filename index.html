@@ -4,9 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Helpdesk Call Logger</title>
-        <script src="https://accounts.google.com/gsi/client" async defer></script>
-<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
     <style>
         :root {
             --bg-primary: #f8fafc;
@@ -2648,20 +2648,11 @@
             <div class="login-logo"><i class="fas fa-headset"></i></div>
             <h1 class="login-title">Helpdesk Logger</h1>
             <p class="login-subtitle">Sign in to access your cases</p>
-            <div id="googleSignInContainer" style="display:flex; justify-content:center; align-items:center;">
-                <div id="g_id_signin"></div>
-                <button class="btn btn-primary" id="fallbackReloadBtn" style="display:none;" onclick="window.location.reload()">Reload</button>
-            </div>
-            <div id="googleSignInError" style="display:none; margin-top:12px; color:#ef4444; font-size:0.9rem;"></div>
-            <!-- legacy button removed -->
-            <!-- <button class="google-btn" onclick="showUserSelect()">
-                <svg width="20" height="20" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
-                Sign in with Google
-            </button> -->
-
-            <div class="user-select-modal" id="userSelectModal">
-                <p style="margin-bottom: 12px; color: var(--text-secondary); font-size: 0.9rem;">Select your account:</p>
-                <div class="user-list" id="userList"></div>
+            <div id="googleSignInButton" style="display:flex;justify-content:center;"></div>
+            <div id="loginStatus" style="margin-top: 16px; display: none;"></div>
+            <div id="loginSpinner" style="margin-top: 20px; display: none; text-align: center; color: var(--text-muted);">
+                <i class="fas fa-spinner fa-spin" style="font-size: 1.5rem;"></i>
+                <p style="margin-top: 8px; font-size: 0.9rem;">Verifying access...</p>
             </div>
         </div>
     </div>
@@ -3151,18 +3142,12 @@
     </div>
 
 <script>
-  const GOOGLE_CLIENT_ID = "891866104091-i9fkn42vbnrd368imrnq186mlb6m00sn.apps.googleusercontent.com";
-
 // Google Apps Script API URL
-const API_URL = "https://script.google.com/macros/s/AKfycbwxWL6kuXGE8KC0TWeN_ThD9f-z62cDvMDdpcI-SngbjSL0Li9uC8_noj_ytJx0cdqO/exec"; // GAS Web App endpoint
+const API_URL = 'https://script.google.com/macros/s/AKfycbwxWL6kuXGE8KC0TWeN_ThD9f-z62cDvMDdpcI-SngbjSL0Li9uC8_noj_ytJx0cdqO/exec';
+const API_KEY = 'JeiC5tQBKDhlHxBFLThr0zjKBA_dLS0hjmyg9vEqaLg';
 
-async function startSessionLogin() {
-    // Session-based Google login happens automatically by Google before the app loads.
-    // This button simply reloads the page to trigger Google sign-in if needed.
-    window.location.reload();
-}
-
-let sessionToken = null;
+// Google OAuth Client ID - replace with your own from Google Cloud Console
+const GOOGLE_CLIENT_ID = 'REPLACE_WITH_YOUR_CLIENT_ID.apps.googleusercontent.com';
 
 // User management - will be loaded from API
 let USERS = [];
@@ -3320,49 +3305,101 @@ function getMatchIndicatorsHtml(matches, caseData, relatedCases) {
 let isEditMode = false, editingJobId = null, originalFormData = null;
 let threeOptionSaveCallback = null, threeOptionDiscardCallback = null;
 
-
 async function init() {
-    renderGoogleSignInButton();
-
     showLoadingOverlay('Loading...');
+    await loadUsersFromAPI();
+    await loadWorksheetsFromAPI();
     initAllDropdowns();
-
-    // Render Google Sign-In button
-    renderGoogleSignInButton();
-
-    // If there's an existing session token, validate it and auto-login
-    if (sessionToken) {
-        try {
-            const me = await apiGet('getMe');
-            if (me && me.success && me.user && me.user.email) {
-                currentUser = me.user;
-                await afterLoginInit();
-                hideLoginScreen();
-            } else {
-                clearSession();
-            }
-        } catch (e) {
-            clearSession();
-        }
-    }
-
     hideLoadingOverlay();
+    initGoogleSignIn();
 }
 
+function initGoogleSignIn() {
+    // Wait for GIS library to load
+    if (typeof google === 'undefined' || !google.accounts) {
+        setTimeout(initGoogleSignIn, 200);
+        return;
+    }
+    google.accounts.id.initialize({
+        client_id: GOOGLE_CLIENT_ID,
+        callback: handleGoogleSignIn
+    });
+    google.accounts.id.renderButton(
+        document.getElementById('googleSignInButton'),
+        { theme: 'outline', size: 'large', shape: 'rectangular', text: 'signin_with', width: 300 }
+    );
+}
+
+function handleGoogleSignIn(response) {
+    // Show spinner while verifying
+    var signInBtn = document.getElementById('googleSignInButton');
+    var spinner = document.getElementById('loginSpinner');
+    var statusEl = document.getElementById('loginStatus');
+    signInBtn.style.display = 'none';
+    spinner.style.display = 'block';
+    statusEl.style.display = 'none';
+
+    try {
+        // Decode the JWT credential to get user info
+        var payload = JSON.parse(atob(response.credential.split('.')[1]));
+        var email = payload.email;
+        var name = payload.name;
+        var picture = payload.picture;
+
+        // Check if user is in the Master Spreadsheet and active
+        var user = USERS.find(function(u) {
+            return u.email.toLowerCase() === email.toLowerCase();
+        });
+
+        if (!user) {
+            showLoginError('Access denied. Your Google account (' + email + ') is not registered in the Helpdesk Logger. Please contact the administrator.');
+            return;
+        }
+
+        if (!user.isActive) {
+            showLoginError('Your account (' + email + ') is inactive. Please contact the administrator.');
+            return;
+        }
+
+        if (!user.worksheet) {
+            showLoginError('No worksheet assigned to your account. Please contact the administrator.');
+            return;
+        }
+
+        if (!WORKSHEETS.includes(user.worksheet)) {
+            showLoginError('Worksheet "' + user.worksheet + '" not found. Please contact the administrator.');
+            return;
+        }
+
+        // Authentication successful - login as the user
+        loginAs(email);
+
+    } catch (err) {
+        showLoginError('Authentication failed. Please try again.');
+    }
+}
+
+function showLoginError(message) {
+    var signInBtn = document.getElementById('googleSignInButton');
+    var spinner = document.getElementById('loginSpinner');
+    var statusEl = document.getElementById('loginStatus');
+    spinner.style.display = 'none';
+    signInBtn.style.display = 'flex';
+    statusEl.style.display = 'block';
+    statusEl.innerHTML = '<div style="padding: 12px 16px; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); border-radius: 8px; color: var(--danger); font-size: 0.85rem; text-align: center;"><i class="fas fa-exclamation-circle"><\/i> ' + message + '<\/div>';
+}
 
 // API Helper functions
 async function apiGet(action, params = {}) {
-    // In Apps Script Web App, GET is used for the HTML UI.
-    // Use POST for API calls to avoid receiving HTML (<!doctype ...).
     const url = new URL(API_URL);
+    url.searchParams.append('key', API_KEY);
     url.searchParams.append('action', action);
+    Object.keys(params).forEach(key => url.searchParams.append(key, params[key]));
 
     const response = await fetch(url.toString(), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(params || {})
+        method: 'GET',
+        redirect: 'follow'
     });
-
     return await response.json();
 }
 
@@ -3370,6 +3407,7 @@ async function apiPost(action, data, params = {}) {
     // Google Apps Script has CORS issues with POST from different origins
     // Use GET with data encoded in URL as a workaround
     const url = new URL(API_URL);
+    url.searchParams.append('key', API_KEY);
     url.searchParams.append('action', action);
     Object.keys(params).forEach(key => url.searchParams.append(key, params[key]));
     url.searchParams.append('postData', JSON.stringify(data));
@@ -3762,127 +3800,8 @@ async function loadCasesFromAPI(worksheet, startDate, endDate) {
 }
 
 function renderUserList() {
-    // Only show active users with valid worksheet mapping
-    const activeUsers = USERS.filter(u => u.isActive);
-    if (activeUsers.length === 0) {
-        document.getElementById('userList').innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted);">No users found. Please add users in the Config worksheet.<\/div>';
-        return;
-    }
-    document.getElementById('userList').innerHTML = activeUsers.map(u => `<div class="user-option" onclick="loginAs('${u.email}')"><div class="user-option-avatar">${u.initials}<\/div><div class="user-option-info"><div class="user-option-name">${u.name}${u.role === 'admin' ? ' <i class="fas fa-shield-alt" style="color: var(--warning); font-size: 0.8rem;" title="Admin"><\/i>' : ''}<\/div><div class="user-option-email">${u.email}<\/div><\/div><\/div>`).join('');
+    // Kept for admin user management - no longer used for login
 }
-
-
-function clearSession() {
-    sessionToken = '';
-    localStorage.removeItem('helpdeskSessionToken');
-    currentUser = null;
-}
-
-function hideLoginScreen() {
-    document.getElementById('loginScreen').style.display = 'none';
-    document.getElementById('appContainer').style.display = 'block';
-}
-
-function showLoginScreen() {
-    document.getElementById('loginScreen').style.display = 'flex';
-    document.getElementById('appContainer').style.display = 'none';
-}
-
-
-function showLoginOnly(msg) {
-    showLoginScreen();
-    try { showToast(msg || 'Not authorized', 'error'); } catch (e) { alert(msg || 'Not authorized'); }
-}
-
-function renderGoogleSignInButton() {
-    try {
-        if (!window.google || !google.accounts || !google.accounts.id) return;
-
-        // Clear container in case of re-render
-        const btnDiv = document.getElementById('g_id_signin');
-        if (btnDiv) btnDiv.innerHTML = '';
-
-        google.accounts.id.initialize({
-            client_id: GOOGLE_CLIENT_ID,
-            callback: handleGoogleCredential,
-            auto_select: false,
-            cancel_on_tap_outside: true
-        });
-
-        google.accounts.id.renderButton(btnDiv, {
-            theme: 'outline',
-            size: 'large',
-            type: 'standard',
-            text: 'signin_with',
-            shape: 'pill',
-            width: 320
-        });
-    } catch (e) {
-        console.error('Failed to render Google Sign-In button', e);
-        showToast('Google Sign-In failed to load. Please refresh and try again.', 'error');
-    }
-}
-
-// Called by GIS when user completes sign-in
-async function handleGoogleCredential(response) {
-    try {
-        showLoadingOverlay('Signing in...');
-        const idToken = response && response.credential;
-        if (!idToken) throw new Error('Missing credential');
-
-        const res = await apiPost('authLogin', { idToken });
-        if (!res || !res.success) {
-            clearSession();
-            showToast(res?.error || 'Access denied.', 'error');
-            hideLoadingOverlay();
-            return;
-        }
-
-        sessionToken = res.sessionToken;
-        localStorage.setItem('helpdeskSessionToken', sessionToken);
-
-        currentUser = res.user;
-        await afterLoginInit();
-        hideLoginScreen();
-        showToast(`Welcome, ${currentUser.name}!`, 'success');
-    } catch (e) {
-        console.error(e);
-        clearSession();
-        showToast('Sign-in failed. Please try again.', 'error');
-    } finally {
-        hideLoadingOverlay();
-    }
-}
-
-async function afterLoginInit() {
-    // Load data needed for the app after authorization
-    await loadWorksheetsFromAPI();
-
-    // Admin-only: load users list for admin screens (avoid exposing to all)
-    if (currentUser && String(currentUser.role || '').toLowerCase().includes('admin')) {
-        await loadUsersFromAPI();
-        renderUserList();
-    }
-
-    // Initialize the main UI
-    initAllDropdowns();
-    await loadCases();
-    updateHeaderUserInfo();
-    applyRoleBasedUI();
-}
-
-// Update UI header with the signed-in user's name/initials
-function updateHeaderUserInfo() {
-    const el = document.getElementById('currentUserName');
-    if (el && currentUser) el.textContent = currentUser.name || currentUser.email;
-}
-
-function applyRoleBasedUI() {
-    // If you already have admin buttons/menus, keep existing logic.
-    // This function is a safe hook point.
-}
-
-function showUserSelect() { document.getElementById('userSelectModal').classList.add('show'); }
 
 async function loginAs(email) {
     const user = USERS.find(u => u.email === email);
@@ -4253,10 +4172,22 @@ function logout() {
         var caseDetailModal = document.getElementById('caseDetailModal');
         if (caseDetailModal) caseDetailModal.classList.remove('show');
 
+        // Revoke Google sign-in session
+        if (typeof google !== 'undefined' && google.accounts && google.accounts.id) {
+            google.accounts.id.disableAutoSelect();
+        }
+
+        // Reset login screen UI
+        var signInBtn = document.getElementById('googleSignInButton');
+        var spinner = document.getElementById('loginSpinner');
+        var statusEl = document.getElementById('loginStatus');
+        if (signInBtn) signInBtn.style.display = 'flex';
+        if (spinner) spinner.style.display = 'none';
+        if (statusEl) statusEl.style.display = 'none';
+
         // Show login screen
         document.getElementById('loginScreen').style.display = 'flex';
         document.getElementById('appContainer').classList.remove('show');
-        document.getElementById('userSelectModal').classList.remove('show');
 
         // Switch to dashboard view
         showView('dashboard');
@@ -5876,7 +5807,7 @@ async function checkMissingMonthsForAdminPeriod() {
 
     try {
         var dateRange = getAdminDateRange();
-        var result = await apiGet('checkMissingMonths', { startDate: dateRange.startDate, endDate: dateRange.endDate });
+        var response = await fetch(API_URL + '?key=' + API_KEY + '&action=checkMissingMonths&startDate=' + dateRange.startDate + '&endDate=' + dateRange.endDate);
         var result = await response.json();
 
         if (result.success && result.missingMonths && result.missingMonths.length > 0) {
@@ -7455,7 +7386,7 @@ function editCase() {
     }
 }
 
-async function closeCase() {
+function closeCase() {
     showConfirm('Close Case', 'Mark this case and all follow-ups as Completed?', async () => {
         showLoadingOverlay('Closing case...');
         try {
@@ -7577,7 +7508,9 @@ function confirmDeleteCase() {
 async function deleteCase(jobId, deleteAll) {
     showLoadingOverlay('Deleting...');
     try {
-        const result = await apiGet('deleteCase', { worksheet: currentUser.worksheet, jobId, deleteAll: deleteAll ? 'true' : 'false' });
+        const url = `${API_URL}?key=${API_KEY}&action=deleteCase&worksheet=${encodeURIComponent(currentUser.worksheet)}&jobId=${encodeURIComponent(jobId)}&deleteAll=${deleteAll}`;
+        const response = await fetch(url);
+        const result = await response.json();
 
         if (result.success) {
             showToast(result.message || 'Case deleted successfully', 'success');
@@ -7784,7 +7717,7 @@ function clearSelection() {
     document.getElementById('selectedCount').textContent = '0';
 }
 
-async function bulkCloseCases() {
+function bulkCloseCases() {
     const selectedJobIds = Array.from(document.querySelectorAll('#casesList .case-checkbox:checked'))
         .map(cb => cb.dataset.jobid);
 
@@ -8716,7 +8649,7 @@ async function saveUser(event) {
     }
 }
 
-async function toggleUserStatus(email) {
+function toggleUserStatus(email) {
     const user = USERS.find(u => u.email === email);
     if (!user) return;
 
@@ -8770,7 +8703,7 @@ window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', eve
     document.getElementById('themeIcon').className = isDarkMode ? 'fas fa-sun' : 'fas fa-moon';
 });
 
-document.addEventListener('DOMContentLoaded', initAuthBootstrap);
+document.addEventListener('DOMContentLoaded', init);
 
 // iOS Safari fix: Reinitialize dropdowns when page becomes visible again after switching apps
 document.addEventListener('visibilitychange', function() {
@@ -8839,7 +8772,6 @@ window.showAdminTab = showAdminTab;
 window.showAutocomplete = showAutocomplete;
 window.showClassificationWizard = showClassificationWizard;
 window.showPeriodModal = showPeriodModal;
-window.showUserSelect = showUserSelect;
 window.showView = showView;
 window.sortByColumn = sortByColumn;
 window.switchPeriodCustomTab = switchPeriodCustomTab;
@@ -8855,68 +8787,9 @@ window.viewAdminCaseDetail = viewAdminCaseDetail;
 window.wizardGoBack = wizardGoBack;
 window.wizardGoNext = wizardGoNext;
 window.wizardGoToStep = wizardGoToStep;
-
-// ==============================
-// Auth bootstrap for GitHub Pages
-// ==============================
-
-function showLoginOnly(msg) {
-    showLoginScreen();
-    const el = document.getElementById('googleSignInError');
-    if (el) {
-        el.style.display = 'block';
-        el.textContent = msg || 'Not authorized';
-    } else {
-        try { showToast(msg || 'Not authorized', 'error'); } catch (e) { alert(msg || 'Not authorized'); }
-    }
-}
-
-// Try existing session token first; otherwise show Google Sign-In button.
-async function initAuthBootstrap() {
-    try {
-        showLoginScreen();
-
-        // Render button when GIS is available
-        if (window.google && google.accounts && google.accounts.id) {
-            renderGoogleSignInButton();
-        } else {
-            // If GIS is blocked by extensions, show a helpful message
-            setTimeout(function() {
-                if (!(window.google && google.accounts && google.accounts.id)) {
-                    const el = document.getElementById('googleSignInError');
-                    if (el) {
-                        el.style.display = 'block';
-                        el.textContent = 'Google Sign-In did not load. Please disable ad blockers for this site and refresh.';
-                    }
-                    const fb = document.getElementById('fallbackReloadBtn');
-                    if (fb) fb.style.display = 'inline-flex';
-                }
-            }, 1200);
-        }
-
-        // If user already has a session token, validate it
-        const token = localStorage.getItem('helpdeskSessionToken');
-        if (token) {
-            sessionToken = token;
-            const me = await apiPost('authMe', { sessionToken: token });
-            if (me && me.success && me.user) {
-                currentUser = me.user;
-                await afterLoginInit();
-                hideLoginScreen();
-                return;
-            } else {
-                clearSession();
-            }
-        }
-
-        // Stay on login screen (user must click the Google button)
-        showLoginScreen();
-    } catch (e) {
-        console.error(e);
-        showLoginOnly('Unable to start sign-in. Please refresh and try again.');
-    }
-}
-
+window.handleGoogleSignIn = handleGoogleSignIn;
+window.initGoogleSignIn = initGoogleSignIn;
+window.showLoginError = showLoginError;
 </script>
 </body>
 </html>
