@@ -1512,6 +1512,12 @@
             cursor: not-allowed;
         }
 
+        /* Validation error highlight */
+        .field-error { border-color: #ef4444 !important; background: rgba(239, 68, 68, 0.06) !important; }
+        .field-error:focus { box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.15) !important; border-color: #ef4444 !important; }
+        .custom-dropdown.field-error .custom-dropdown-selected { border-color: #ef4444 !important; background: rgba(239, 68, 68, 0.06) !important; }
+        .channel-selector.field-error { border: 1px solid #ef4444 !important; border-radius: var(--radius-md); background: rgba(239, 68, 68, 0.06) !important; }
+
         /* Uppercase input but normal placeholder */
         .form-input.uppercase-input { text-transform: uppercase; }
         .form-input.uppercase-input::placeholder { text-transform: none; }
@@ -6683,6 +6689,8 @@ function setCustomDropdownValue(fieldId, value) {
     if (value) {
         selectedDiv.textContent = value;
         selectedDiv.classList.remove('placeholder');
+        // Clear validation highlight when value is selected
+        if (typeof clearFieldHighlight === 'function') clearFieldHighlight(fieldId);
         // Update selected state
         dropdown.querySelectorAll('.custom-dropdown-option').forEach(function(opt) {
             opt.classList.toggle('selected', opt.dataset.value === value);
@@ -6972,6 +6980,7 @@ function selectChannel(value) {
     document.getElementById('channel').value = value;
     document.querySelectorAll('.channel-option').forEach(o => o.classList.remove('selected'));
     document.querySelector(`.channel-option.${value.toLowerCase()}`).classList.add('selected');
+    if (typeof clearFieldHighlight === 'function') clearFieldHighlight('channel');
 }
 
 // Format Contact Person: Proper case, remove double/trailing spaces
@@ -7100,6 +7109,56 @@ function executeDiscard() {
     if (callback) callback();
 }
 
+// --- Validation highlight helpers ---
+function highlightField(fieldId) {
+    var el = document.getElementById(fieldId);
+    if (!el) return;
+    var dropdown = document.getElementById(fieldId + 'Dropdown');
+    if (dropdown) {
+        dropdown.classList.add('field-error');
+    } else if (fieldId === 'channel') {
+        var channelSel = el.closest('.channel-selector') || document.querySelector('.channel-selector');
+        if (channelSel) channelSel.classList.add('field-error');
+    } else {
+        el.classList.add('field-error');
+    }
+}
+
+function clearFieldHighlight(fieldId) {
+    var el = document.getElementById(fieldId);
+    if (!el) return;
+    var dropdown = document.getElementById(fieldId + 'Dropdown');
+    if (dropdown) {
+        dropdown.classList.remove('field-error');
+    } else if (fieldId === 'channel') {
+        var channelSel = el.closest('.channel-selector') || document.querySelector('.channel-selector');
+        if (channelSel) channelSel.classList.remove('field-error');
+    } else {
+        el.classList.remove('field-error');
+    }
+}
+
+function highlightAndFocus(fieldId) {
+    highlightField(fieldId);
+    var dropdown = document.getElementById(fieldId + 'Dropdown');
+    if (dropdown) {
+        var selEl = dropdown.querySelector('.custom-dropdown-selected');
+        if (selEl) { selEl.scrollIntoView({ behavior: 'smooth', block: 'center' }); selEl.focus(); }
+    } else if (fieldId === 'channel') {
+        var channelSel = document.querySelector('.channel-selector');
+        if (channelSel) channelSel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    } else {
+        var el2 = document.getElementById(fieldId);
+        if (el2) { el2.scrollIntoView({ behavior: 'smooth', block: 'center' }); el2.focus(); }
+    }
+}
+
+// Auto-clear error highlight when user fills a field
+['symptom', 'actionDetail', 'contactPerson', 'telNo', 'agentCode', 'escalateTicket', 'callDate', 'startTime', 'endTime'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) el.addEventListener('input', function() { clearFieldHighlight(id); });
+});
+
 function enableAllFormFields() { ['channel', 'source', 'contactPerson', 'telNo', 'agentCode', 'location', 'caseType', 'category', 'subcategory', 'subject'].forEach(id => { const el = document.getElementById(id); if (el) el.disabled = false; }); }
 
 function disableFollowUpFields() { ['channel', 'source', 'contactPerson', 'telNo', 'agentCode', 'caseType', 'category', 'subcategory', 'subject'].forEach(id => { const el = document.getElementById(id); if (el) el.disabled = true; }); }
@@ -7121,29 +7180,32 @@ async function saveCase(event) {
 
     // Check channel first (custom selector, appears near top of form)
     const channelVal = document.getElementById('channel').value;
-    if (!channelVal) { showToast('Please select a Channel', 'error'); resetSaveBtn(); return; }
+    if (!channelVal) { highlightAndFocus('channel'); showToast('Please select a Channel', 'error'); resetSaveBtn(); return; }
 
     // Validate custom dropdown fields (hidden inputs don't trigger HTML5 validation)
     const sourceVal = document.getElementById('source').value;
-    if (!sourceVal) { showToast('Please select a Source', 'error'); resetSaveBtn(); return; }
+    if (!sourceVal) { highlightAndFocus('source'); showToast('Please select a Source', 'error'); resetSaveBtn(); return; }
 
     const caseTypeVal = document.getElementById('caseType').value;
-    if (!caseTypeVal) { showToast('Please select a Case Type', 'error'); resetSaveBtn(); return; }
+    if (!caseTypeVal) { highlightAndFocus('caseType'); showToast('Please select a Case Type', 'error'); resetSaveBtn(); return; }
 
     const categoryVal = document.getElementById('category').value;
-    if (!categoryVal) { showToast('Please select a Category', 'error'); resetSaveBtn(); return; }
+    if (!categoryVal) { highlightAndFocus('category'); showToast('Please select a Category', 'error'); resetSaveBtn(); return; }
 
     const subcategoryVal = document.getElementById('subcategory').value;
-    if (!subcategoryVal) { showToast('Please select a Subcategory', 'error'); resetSaveBtn(); return; }
+    if (!subcategoryVal) { highlightAndFocus('subcategory'); showToast('Please select a Subcategory', 'error'); resetSaveBtn(); return; }
 
     const subjectVal = document.getElementById('subject').value;
-    if (!subjectVal) { showToast('Please select a Subject', 'error'); resetSaveBtn(); return; }
+    if (!subjectVal) { highlightAndFocus('subject'); showToast('Please select a Subject', 'error'); resetSaveBtn(); return; }
 
     const actionResultVal = document.getElementById('actionResult').value;
-    if (!actionResultVal) { showToast('Please select a Case Status', 'error'); resetSaveBtn(); return; }
+    if (!actionResultVal) { highlightAndFocus('actionResult'); showToast('Please select a Case Status', 'error'); resetSaveBtn(); return; }
 
     // Check HTML5 form validation for remaining fields
     if (!form.checkValidity()) {
+        // Highlight the first invalid native field
+        var firstInvalid = form.querySelector(':invalid');
+        if (firstInvalid && firstInvalid.id) highlightAndFocus(firstInvalid.id);
         form.reportValidity();
         resetSaveBtn();
         return;
@@ -7160,8 +7222,8 @@ async function saveCase(event) {
 
     // Validate end time is >= start time
     if (timeToMins(endTime) < timeToMins(startTime)) {
+        highlightAndFocus('endTime');
         showToast('End time cannot be before start time', 'error');
-        document.getElementById('endTime').focus();
         resetSaveBtn();
         return;
     }
