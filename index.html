@@ -2744,7 +2744,7 @@
             <div class="header-tabs">
                 <button class="header-tab active" onclick="navigateTo('dashboard')"><i class="fas fa-chart-pie"></i> <span class="tab-text">Dashboard</span></button>
                 <button class="header-tab" onclick="navigateTo('newCase')"><i class="fas fa-plus"></i> <span class="tab-text">New Case</span></button>
-                <button class="header-tab" id="reportTab" onclick="navigateTo('report')" style="display: none;"><i class="fas fa-file-alt"></i> <span class="tab-text">Monthly Report</span></button>
+
                 <button class="header-tab" id="adminTab" onclick="navigateTo('admin')" style="display: none;"><i class="fas fa-cog"></i> <span class="tab-text">Admin</span></button>
             </div>
             <div class="header-right">
@@ -3042,10 +3042,27 @@
 
                 <!-- Reports Tab -->
                 <div id="adminReportsTab" class="admin-tab-content">
-                    <div class="reports-placeholder">
-                        <i class="fas fa-chart-line" style="font-size: 3rem; color: var(--text-muted);"></i>
-                        <h3>Management Reports</h3>
-                        <p>Coming soon - View team statistics and generate reports</p>
+                    <div class="report-header">
+                        <h2><i class="fas fa-file-alt" style="color: var(--accent-primary);"></i> Monthly Report</h2>
+                        <p class="admin-subtitle">Monthly case analysis and performance metrics</p>
+                    </div>
+                    <div class="report-controls">
+                        <div class="report-month-picker">
+                            <label class="form-label" style="margin-bottom:4px;">Service Month</label>
+                            <input type="month" class="form-input" id="reportMonth" onchange="generateReport()">
+                        </div>
+                        <div class="report-channel-filter">
+                            <label class="form-label" style="margin-bottom:4px;">Channel</label>
+                            <div class="report-channel-tabs">
+                                <button class="report-channel-tab active" data-channel="all" onclick="setReportChannel('all')">All</button>
+                                <button class="report-channel-tab" data-channel="Agency" onclick="setReportChannel('Agency')">Agency</button>
+                                <button class="report-channel-tab" data-channel="Broker" onclick="setReportChannel('Broker')">Broker</button>
+                                <button class="report-channel-tab" data-channel="Banca" onclick="setReportChannel('Banca')">Banca</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="reportContent">
+                        <div class="report-placeholder"><i class="fas fa-chart-bar"></i><p>Select a service month to generate the report</p></div>
                     </div>
                 </div>
             </div>
@@ -3211,32 +3228,6 @@
             </div>
         </div>
     </div>
-
-    <!-- Monthly Report View (Admin Only) -->
-            <div id="reportView" class="form-container">
-                <div class="report-header">
-                    <h2><i class="fas fa-file-alt" style="color: var(--accent-primary);"></i> Monthly Report</h2>
-                    <p class="admin-subtitle">Monthly case analysis and performance metrics</p>
-                </div>
-                <div class="report-controls">
-                    <div class="report-month-picker">
-                        <label class="form-label" style="margin-bottom:4px;">Service Month</label>
-                        <input type="month" class="form-input" id="reportMonth" onchange="generateReport()">
-                    </div>
-                    <div class="report-channel-filter">
-                        <label class="form-label" style="margin-bottom:4px;">Channel</label>
-                        <div class="report-channel-tabs">
-                            <button class="report-channel-tab active" data-channel="all" onclick="setReportChannel('all')">All</button>
-                            <button class="report-channel-tab" data-channel="Agency" onclick="setReportChannel('Agency')">Agency</button>
-                            <button class="report-channel-tab" data-channel="Broker" onclick="setReportChannel('Broker')">Broker</button>
-                            <button class="report-channel-tab" data-channel="Banca" onclick="setReportChannel('Banca')">Banca</button>
-                        </div>
-                    </div>
-                </div>
-                <div id="reportContent">
-                    <div class="report-placeholder"><i class="fas fa-chart-bar"></i><p>Select a service month to generate the report</p></div>
-                </div>
-            </div>
 
     <!-- Toast & Modal -->
     <div class="toast" id="toast"><i class="fas fa-check-circle"></i><span id="toastMessage">Saved!</span></div>
@@ -4075,10 +4066,6 @@ function updateAdminAccess() {
     if (adminTab) {
         adminTab.style.display = currentUser && currentUser.role === 'admin' ? 'flex' : 'none';
     }
-    const reportTab = document.getElementById('reportTab');
-    if (reportTab) {
-        reportTab.style.display = currentUser && currentUser.role === 'admin' ? 'flex' : 'none';
-    }
 }
 
 function updateAdminUIRestrictions() {
@@ -4460,7 +4447,6 @@ function showView(viewName, skipReset = false) {
     document.getElementById('newCaseView').classList.remove('active');
     document.getElementById('caseDetailView').classList.remove('active');
     document.getElementById('adminView').classList.remove('active');
-    document.getElementById('reportView').classList.remove('active');
     document.getElementById('formButtonGroup').classList.remove('show');
     document.querySelectorAll('.header-tab').forEach(t => t.classList.remove('active'));
     switch(viewName) {
@@ -4476,12 +4462,6 @@ function showView(viewName, skipReset = false) {
             break;
         case 'newCase': document.getElementById('newCaseView').classList.add('active'); document.getElementById('formButtonGroup').classList.add('show'); if (!skipReset) { document.querySelectorAll('.header-tab')[1].classList.add('active'); resetNewCaseForm(); } break;
         case 'caseDetail': document.getElementById('caseDetailView').classList.add('active'); break;
-        case 'report':
-            document.getElementById('reportView').classList.add('active');
-            document.getElementById('reportTab').classList.add('active');
-            initReportMonth();
-            generateReport();
-            break;
         case 'admin':
             document.getElementById('adminView').classList.add('active');
             document.getElementById('adminTab').classList.add('active');
@@ -8163,6 +8143,7 @@ function showAdminTab(tabName) {
     } else if (tabName === 'reports') {
         document.querySelector('.admin-tab:nth-child(3)').classList.add('active');
         document.getElementById('adminReportsTab').classList.add('active');
+        initReportMonth();
     }
 }
 
@@ -9100,29 +9081,60 @@ function setReportChannel(channel) {
 }
 
 function initReportMonth() {
-    var now = new Date();
-    // Default to last month
-    var lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    var y = lastMonth.getFullYear();
-    var m = String(lastMonth.getMonth() + 1).padStart(2, '0');
     var input = document.getElementById('reportMonth');
-    if (input) input.value = y + '-' + m;
+    if (input) input.value = '';
 }
 
-function generateReport() {
+async function generateReport() {
     var monthVal = document.getElementById('reportMonth').value;
     if (!monthVal) {
         document.getElementById('reportContent').innerHTML = '<div class="report-placeholder"><i class="fas fa-chart-bar"></i><p>Select a service month to generate the report</p></div>';
         return;
+    }
+    var parts = monthVal.split('-');
+    var monthStart = parts[0] + '-' + parts[1] + '-01';
+    var lastDay = new Date(parseInt(parts[0]), parseInt(parts[1]), 0).getDate();
+    var monthEnd = parts[0] + '-' + parts[1] + '-' + String(lastDay).padStart(2, '0');
+    if (!isDateRangeCovered(monthStart, monthEnd)) {
+        document.getElementById('reportContent').innerHTML = '<div class="report-placeholder"><i class="fas fa-spinner fa-spin"></i><p>Loading data for selected month...</p></div>';
+        var loadResult = await loadCases({
+            startDate: monthStart,
+            endDate: monthEnd,
+            worksheets: currentUser.worksheets || [],
+            showProgress: true,
+            progressPrefix: 'Loading report data...'
+        });
+        if (loadResult.cases && loadResult.cases.length > 0) {
+            var existingJobIds = {};
+            adminCases.forEach(function(c) { existingJobIds[c.jobId + '_' + c.worksheet] = true; });
+            var newCases = loadResult.cases.filter(function(c) { return !existingJobIds[c.jobId + '_' + c.worksheet]; });
+            adminCases = adminCases.concat(newCases);
+            cases = adminCases;
+            if (loadResult.actualStartDate && (!adminCachedStartDate || loadResult.actualStartDate < adminCachedStartDate)) {
+                adminCachedStartDate = loadResult.actualStartDate;
+            }
+            if (loadResult.actualEndDate && (!adminCachedEndDate || loadResult.actualEndDate > adminCachedEndDate)) {
+                adminCachedEndDate = loadResult.actualEndDate;
+            }
+        }
     }
     var data = buildReportData(monthVal, reportChannel);
     var html = '';
     html += renderKPISummary(data);
     html += renderChannelPerformance(data);
     html += renderCaseStatusTable(data);
-    // Remaining sections will be added in future pieces
+    html += renderDailyBreakdown(data);
+    html += renderTop10Subcategory(data);
+    html += renderTop10CategoryPath(data);
+    html += renderCategoryBreakdown(data);
+    html += renderTimePeriodBreakdown(data);
     document.getElementById('reportContent').innerHTML = html;
     renderCaseStatusDonut(data);
+    renderDailyBreakdownChart(data);
+    renderTop10SubcatChart(data);
+    renderTop10CatPathChart(data);
+    renderCategoryBreakdownChart(data);
+    renderTimePeriodChart(data);
 }
 
 // --- Report data computation helpers ---
@@ -9394,6 +9406,474 @@ function renderCaseStatusDonut(data) {
     });
 }
 
+
+// Section 4: Daily Activity Breakdown
+function renderDailyBreakdown(data) {
+    var monthVal = document.getElementById('reportMonth').value;
+    var parts = monthVal.split('-');
+    var year = parseInt(parts[0]);
+    var month = parseInt(parts[1]);
+    var daysInMonth = new Date(year, month, 0).getDate();
+    var dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+    var monthPrefix = monthVal + '-'; // e.g. "2026-01-"
+
+    // Collect ALL individual cases (root + follow-ups) whose createDate falls in the selected month
+    // Deduplicate: since getRelatedCases may return overlapping sets, use a seen set
+    var seenIds = {};
+    var dailyCountsDedup = {};
+    var dailyDurationsDedup = {};
+    for (var d = 1; d <= daysInMonth; d++) {
+        dailyCountsDedup[d] = 0;
+        dailyDurationsDedup[d] = 0;
+    }
+    data.roots.forEach(function(root) {
+        var related = getRelatedCases(root);
+        related.forEach(function(c) {
+            var caseKey = c.jobId + '|' + (c.createDate || '') + '|' + (c.duration || 0) + '|' + (c.channel || '') + '|' + (c.followUpJobId || '');
+            if (seenIds[caseKey]) return;
+            seenIds[caseKey] = true;
+            if (c.createDate && c.createDate.indexOf(monthPrefix) === 0) {
+                var dayNum = parseInt(c.createDate.substring(8, 10));
+                if (dayNum >= 1 && dayNum <= daysInMonth) {
+                    dailyCountsDedup[dayNum]++;
+                    dailyDurationsDedup[dayNum] += parseInt(c.duration) || 0;
+                }
+            }
+        });
+    });
+
+    var totalActivities = 0;
+    var totalDuration = 0;
+
+    var html = '<div class="report-section">';
+    html += '<div class="report-section-title"><i class="fas fa-calendar-day" style="color:var(--info)"></i> Daily Activity Breakdown</div>';
+    html += '<div style="color:var(--text-secondary);font-size:0.95em;margin-bottom:10px;">Includes all case activities (new cases and follow-ups)</div>';
+    html += '<div class="report-table-wrapper"><table class="report-table">';
+    html += '<thead><tr><th>Date</th><th>Day</th><th class="num">Activities</th><th class="num">Total Duration (min)</th><th class="num">Avg Duration (min)</th></tr></thead>';
+    html += '<tbody>';
+
+    for (d = 1; d <= daysInMonth; d++) {
+        var dateStr = year + '-' + (month < 10 ? '0' + month : month) + '-' + (d < 10 ? '0' + d : d);
+        var dt = new Date(year, month - 1, d);
+        var dayName = dayNames[dt.getDay()];
+        var count = dailyCountsDedup[d];
+        var dur = dailyDurationsDedup[d];
+        var avg = count > 0 ? (dur / count) : 0;
+        totalActivities += count;
+        totalDuration += dur;
+        html += '<tr><td>' + dateStr + '</td><td>' + dayName + '</td><td class="num">' + count + '</td><td class="num">' + dur + '</td><td class="num">' + avg.toFixed(1) + '</td></tr>';
+    }
+
+    var totalAvg = totalActivities > 0 ? (totalDuration / totalActivities) : 0;
+    html += '<tr style="font-weight:bold;background:var(--bg-tertiary);"><td colspan="2">Total</td><td class="num">' + totalActivities + '</td><td class="num">' + totalDuration + '</td><td class="num">' + totalAvg.toFixed(1) + '</td></tr>';
+    html += '</tbody></table></div>';
+    html += '<div style="max-width:700px;margin:18px auto 0"><canvas id="dailyBreakdownChart"></canvas></div>';
+    html += '</div>';
+    return html;
+}
+
+function renderDailyBreakdownChart(data) {
+    var canvas = document.getElementById('dailyBreakdownChart');
+    if (!canvas) return;
+
+    var monthVal = document.getElementById('reportMonth').value;
+    var parts = monthVal.split('-');
+    var year = parseInt(parts[0]);
+    var month = parseInt(parts[1]);
+    var daysInMonth = new Date(year, month, 0).getDate();
+    var monthPrefix = monthVal + '-';
+
+    var seenIds = {};
+    var dailyCounts = {};
+    var dailyDurations = {};
+    for (var d = 1; d <= daysInMonth; d++) {
+        dailyCounts[d] = 0;
+        dailyDurations[d] = 0;
+    }
+    data.roots.forEach(function(root) {
+        var related = getRelatedCases(root);
+        related.forEach(function(c) {
+            var caseKey = c.jobId + '|' + (c.createDate || '') + '|' + (c.duration || 0) + '|' + (c.channel || '') + '|' + (c.followUpJobId || '');
+            if (seenIds[caseKey]) return;
+            seenIds[caseKey] = true;
+            if (c.createDate && c.createDate.indexOf(monthPrefix) === 0) {
+                var dayNum = parseInt(c.createDate.substring(8, 10));
+                if (dayNum >= 1 && dayNum <= daysInMonth) {
+                    dailyCounts[dayNum]++;
+                    dailyDurations[dayNum] += parseInt(c.duration) || 0;
+                }
+            }
+        });
+    });
+
+    var labels = [];
+    var activityData = [];
+    var durationData = [];
+    for (d = 1; d <= daysInMonth; d++) {
+        labels.push(d);
+        activityData.push(dailyCounts[d]);
+        durationData.push(dailyDurations[d]);
+    }
+
+    new Chart(canvas.getContext('2d'), {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [
+                {
+                    label: 'Activities',
+                    data: activityData,
+                    backgroundColor: 'rgba(54, 162, 235, 0.7)',
+                    borderColor: 'rgba(54, 162, 235, 1)',
+                    borderWidth: 1,
+                    yAxisID: 'y'
+                },
+                {
+                    label: 'Duration (min)',
+                    data: durationData,
+                    backgroundColor: 'rgba(255, 159, 64, 0.7)',
+                    borderColor: 'rgba(255, 159, 64, 1)',
+                    borderWidth: 1,
+                    yAxisID: 'y1'
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: { position: 'bottom' },
+                title: { display: true, text: 'Daily Activities & Duration', font: { size: 14 } }
+            },
+            scales: {
+                y: {
+                    type: 'linear',
+                    position: 'left',
+                    beginAtZero: true,
+                    title: { display: true, text: 'Activities' }
+                },
+                y1: {
+                    type: 'linear',
+                    position: 'right',
+                    beginAtZero: true,
+                    title: { display: true, text: 'Duration (min)' },
+                    grid: { drawOnChartArea: false }
+                }
+            }
+        }
+    });
+}
+
+function renderTop10Subcategory(data) {
+    var counts = {};
+    var durations = {};
+    data.roots.forEach(function(root) {
+        var sc = root.subCategory || 'Unknown';
+        counts[sc] = (counts[sc] || 0) + 1;
+        durations[sc] = (durations[sc] || 0) + getGroupDuration(root);
+    });
+    var sorted = Object.keys(counts).map(function(sc) {
+        return { subCategory: sc, count: counts[sc], totalDuration: durations[sc] };
+    });
+    sorted.sort(function(a, b) { return b.count - a.count; });
+    var top10 = sorted.slice(0, 10);
+    var html = '<div class="section-card"><div class="section-title"><i class="fas fa-tags" style="color:var(--primary)"></i> Top 10 Subcategory</div>';
+    html += '<table><thead><tr><th>Rank</th><th>Subcategory</th><th>Cases</th><th>Total Duration (min)</th><th>Avg Duration (min)</th></tr></thead><tbody>';
+    top10.forEach(function(item, idx) {
+        var avg = item.count > 0 ? (item.totalDuration / item.count).toFixed(1) : '0.0';
+        html += '<tr><td>' + (idx + 1) + '</td><td>' + item.subCategory + '</td><td>' + item.count + '</td><td>' + item.totalDuration + '</td><td>' + avg + '</td></tr>';
+    });
+    html += '</tbody></table>';
+    html += '<div style="max-width:700px;margin:18px auto 0"><canvas id="top10SubcatChart"></canvas></div>';
+    html += '</div>';
+    return html;
+}
+
+function renderTop10SubcatChart(data) {
+    var canvas = document.getElementById('top10SubcatChart');
+    if (!canvas) return;
+    var counts = {};
+    data.roots.forEach(function(root) {
+        var sc = root.subCategory || 'Unknown';
+        counts[sc] = (counts[sc] || 0) + 1;
+    });
+    var sorted = Object.keys(counts).map(function(sc) {
+        return { subCategory: sc, count: counts[sc] };
+    });
+    sorted.sort(function(a, b) { return b.count - a.count; });
+    var top10 = sorted.slice(0, 10);
+    var labels = top10.map(function(item) { return item.subCategory; });
+    var values = top10.map(function(item) { return item.count; });
+    new Chart(canvas.getContext('2d'), {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'Cases',
+                data: values,
+                backgroundColor: 'rgba(54, 162, 235, 0.7)',
+                borderColor: 'rgba(54, 162, 235, 1)',
+                borderWidth: 1
+            }]
+        },
+        options: {
+            indexAxis: 'y',
+            plugins: {
+                title: { display: true, text: 'Top 10 Subcategory by Cases' },
+                legend: { position: 'bottom' }
+            },
+            scales: {
+                x: { beginAtZero: true }
+            }
+        }
+    });
+}
+function renderTop10CategoryPath(data) {
+    var pathMap = {};
+    (data.roots || []).forEach(function(root) {
+        var path = (root.category || 'Unknown') + ' > ' + (root.subCategory || 'Unknown');
+        if (!pathMap[path]) {
+            pathMap[path] = { count: 0, totalDuration: 0 };
+        }
+        pathMap[path].count++;
+        pathMap[path].totalDuration += getGroupDuration(root);
+    });
+    var sorted = Object.keys(pathMap).map(function(p) {
+        return { path: p, count: pathMap[p].count, totalDuration: pathMap[p].totalDuration };
+    }).sort(function(a, b) { return b.count - a.count; }).slice(0, 10);
+    var html = '<div class="section-title" style="margin-top:32px;"><i class="fas fa-sitemap" style="color:var(--secondary);margin-right:8px;"></i>Top 10 Category Path</div>';
+    html += '<table><thead><tr><th>Rank</th><th>Category Path</th><th>Cases</th><th>Total Duration (min)</th><th>Avg Duration (min)</th></tr></thead><tbody>';
+    sorted.forEach(function(item, i) {
+        var avg = item.count > 0 ? (item.totalDuration / item.count).toFixed(1) : '0.0';
+        html += '<tr><td>' + (i + 1) + '</td><td>' + item.path + '</td><td>' + item.count + '</td><td>' + item.totalDuration.toFixed(1) + '</td><td>' + avg + '</td></tr>';
+    });
+    html += '</tbody></table>';
+    html += '<div style="max-width:700px;margin:18px auto 0"><canvas id="top10CatPathChart"></canvas></div>';
+    return html;
+}
+function renderTop10CatPathChart(data) {
+    var canvas = document.getElementById('top10CatPathChart');
+    if (!canvas) return;
+    var pathMap = {};
+    (data.roots || []).forEach(function(root) {
+        var path = (root.category || 'Unknown') + ' > ' + (root.subCategory || 'Unknown');
+        if (!pathMap[path]) {
+            pathMap[path] = 0;
+        }
+        pathMap[path]++;
+    });
+    var sorted = Object.keys(pathMap).map(function(p) {
+        return { path: p, count: pathMap[p] };
+    }).sort(function(a, b) { return b.count - a.count; }).slice(0, 10);
+    var labels = sorted.map(function(s) { return s.path; });
+    var counts = sorted.map(function(s) { return s.count; });
+    new Chart(canvas.getContext('2d'), {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'Cases',
+                data: counts,
+                backgroundColor: 'rgba(20,184,166,0.7)'
+            }]
+        },
+        options: {
+            indexAxis: 'y',
+            plugins: {
+                title: { display: true, text: 'Top 10 Category Path by Cases' },
+                legend: { position: 'bottom' }
+            },
+            scales: {
+                x: { beginAtZero: true }
+            }
+        }
+    });
+}
+
+function renderCategoryBreakdown(data) {
+  const roots = data.roots || [];
+  const catMap = {};
+  let totalCases = 0;
+  let totalDuration = 0;
+  roots.forEach(function(root) {
+    const cat = root.category || 'Uncategorized';
+    if (!catMap[cat]) catMap[cat] = { count: 0, duration: 0 };
+    catMap[cat].count += 1;
+    catMap[cat].duration += getGroupDuration(root);
+    totalCases += 1;
+    totalDuration += getGroupDuration(root);
+  });
+  const sorted = Object.keys(catMap).map(function(k) {
+    return { category: k, count: catMap[k].count, duration: catMap[k].duration };
+  }).sort(function(a, b) { return b.count - a.count; });
+  let html = '<div class="section-block"><h2 style="display:flex;align-items:center;gap:10px"><span class="section-icon" style="background:var(--warning)"><i class="fas fa-folder-open"></i></span>Cases &amp; Duration by Category</h2>';
+  html += '<div class="table-responsive"><table><thead><tr><th>Category</th><th>Cases</th><th>Total Duration (min)</th><th>Avg Duration (min)</th><th>% of Total Cases</th></tr></thead><tbody>';
+  sorted.forEach(function(row) {
+    const avg = row.count > 0 ? (row.duration / row.count).toFixed(2) : '0.00';
+    const pct = totalCases > 0 ? ((row.count / totalCases) * 100).toFixed(1) : '0.0';
+    html += '<tr><td>' + row.category + '</td><td>' + row.count + '</td><td>' + row.duration.toFixed(2) + '</td><td>' + avg + '</td><td>' + pct + '%</td></tr>';
+  });
+  const totalAvg = totalCases > 0 ? (totalDuration / totalCases).toFixed(2) : '0.00';
+  html += '<tr style="font-weight:bold;background:#f0f0f0"><td>Total</td><td>' + totalCases + '</td><td>' + totalDuration.toFixed(2) + '</td><td>' + totalAvg + '</td><td>100.0%</td></tr>';
+  html += '</tbody></table></div>';
+  html += '<div style="max-width:700px;margin:18px auto 0"><canvas id="categoryBreakdownChart"></canvas></div>';
+  html += '</div>';
+  return html;
+}
+
+function renderCategoryBreakdownChart(data) {
+  const canvas = document.getElementById('categoryBreakdownChart');
+  if (!canvas) return;
+  const roots = data.roots || [];
+  const catMap = {};
+  roots.forEach(function(root) {
+    const cat = root.category || 'Uncategorized';
+    if (!catMap[cat]) catMap[cat] = { count: 0, duration: 0 };
+    catMap[cat].count += 1;
+    catMap[cat].duration += getGroupDuration(root);
+  });
+  const sorted = Object.keys(catMap).map(function(k) {
+    return { category: k, count: catMap[k].count, duration: catMap[k].duration };
+  }).sort(function(a, b) { return b.count - a.count; });
+  const labels = sorted.map(function(r) { return r.category; });
+  const casesData = sorted.map(function(r) { return r.count; });
+  const durationData = sorted.map(function(r) { return parseFloat(r.duration.toFixed(2)); });
+  new Chart(canvas.getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: labels,
+      datasets: [
+        {
+          label: 'Cases',
+          data: casesData,
+          backgroundColor: 'rgba(54,122,235,0.7)',
+          borderColor: 'rgba(54,122,235,1)',
+          borderWidth: 1,
+          yAxisID: 'y'
+        },
+        {
+          label: 'Duration (min)',
+          data: durationData,
+          backgroundColor: 'rgba(255,159,64,0.7)',
+          borderColor: 'rgba(255,159,64,1)',
+          borderWidth: 1,
+          yAxisID: 'y1'
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        title: { display: true, text: 'Cases & Duration by Category' },
+        legend: { position: 'bottom' }
+      },
+      scales: {
+        y: {
+          type: 'linear',
+          position: 'left',
+          beginAtZero: true,
+          title: { display: true, text: 'Cases' }
+        },
+        y1: {
+          type: 'linear',
+          position: 'right',
+          beginAtZero: true,
+          title: { display: true, text: 'Duration (min)' },
+          grid: { drawOnChartArea: false }
+        }
+      }
+    }
+  });
+}
+
+function renderTimePeriodBreakdown(data) {
+  const roots = data.roots || [];
+  const periods = [
+    {name:'Morning',start:6,end:11},
+    {name:'Afternoon',start:12,end:17},
+    {name:'Evening',start:18,end:23},
+    {name:'Night',start:0,end:5}
+  ];
+  const periodStats = periods.map(p => ({name:p.name, start:p.start, end:p.end, count:0, totalDuration:0}));
+  roots.forEach(root => {
+    const ct = root.createTime || '';
+    const parts = ct.split(':');
+    if (parts.length < 2) return;
+    const hour = parseInt(parts[0], 10);
+    if (isNaN(hour)) return;
+    const dur = getGroupDuration(root);
+    for (const ps of periodStats) {
+      if (ps.start <= ps.end) {
+        if (hour >= ps.start && hour <= ps.end) { ps.count++; ps.totalDuration += dur; break; }
+      } else {
+        if (hour >= ps.start || hour <= ps.end) { ps.count++; ps.totalDuration += dur; break; }
+      }
+    }
+  });
+  const totalCases = periodStats.reduce((s,p) => s + p.count, 0);
+  const totalDur = periodStats.reduce((s,p) => s + p.totalDuration, 0);
+  let html = '<div class="section-block" style="border-left:4px solid #8b5cf6">';
+  html += '<h2 style="color:#8b5cf6"><i class="fas fa-clock"></i> Cases &amp; Duration by Time Period</h2>';
+  html += '<table><thead><tr><th>Time Period</th><th>Time Range</th><th>Cases</th><th>Total Duration (min)</th><th>Avg Duration (min)</th><th>% of Total</th></tr></thead><tbody>';
+  periodStats.forEach(ps => {
+    const startStr = String(ps.start).padStart(2,'0') + ':00';
+    const endStr = String(ps.end).padStart(2,'0') + ':59';
+    const avg = ps.count > 0 ? (ps.totalDuration / ps.count).toFixed(1) : '0.0';
+    const pct = totalCases > 0 ? ((ps.count / totalCases) * 100).toFixed(1) : '0.0';
+    html += '<tr><td>' + ps.name + '</td><td>' + startStr + '-' + endStr + '</td><td>' + ps.count + '</td><td>' + ps.totalDuration.toFixed(1) + '</td><td>' + avg + '</td><td>' + pct + '%</td></tr>';
+  });
+  const totalAvg = totalCases > 0 ? (totalDur / totalCases).toFixed(1) : '0.0';
+  html += '<tr style="font-weight:bold;background:#f0f0f0"><td>Total</td><td>-</td><td>' + totalCases + '</td><td>' + totalDur.toFixed(1) + '</td><td>' + totalAvg + '</td><td>100.0%</td></tr>';
+  html += '</tbody></table>';
+  html += '<div style="max-width:500px;margin:18px auto 0"><canvas id="timePeriodChart"></canvas></div>';
+  html += '</div>';
+  return html;
+}
+
+function renderTimePeriodChart(data) {
+  const canvas = document.getElementById('timePeriodChart');
+  if (!canvas) return;
+  const roots = data.roots || [];
+  const periods = [
+    {name:'Morning',start:6,end:11},
+    {name:'Afternoon',start:12,end:17},
+    {name:'Evening',start:18,end:23},
+    {name:'Night',start:0,end:5}
+  ];
+  const counts = [0,0,0,0];
+  roots.forEach(root => {
+    const ct = root.createTime || '';
+    const parts = ct.split(':');
+    if (parts.length < 2) return;
+    const hour = parseInt(parts[0], 10);
+    if (isNaN(hour)) return;
+    for (let i = 0; i < periods.length; i++) {
+      const p = periods[i];
+      if (p.start <= p.end) {
+        if (hour >= p.start && hour <= p.end) { counts[i]++; break; }
+      } else {
+        if (hour >= p.start || hour <= p.end) { counts[i]++; break; }
+      }
+    }
+  });
+  new Chart(canvas.getContext('2d'), {
+    type: 'doughnut',
+    data: {
+      labels: ['Morning','Afternoon','Evening','Night'],
+      datasets: [{
+        data: counts,
+        backgroundColor: ['#f59e0b','#3b82f6','#8b5cf6','#1e293b']
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        title: { display: true, text: 'Cases by Time Period' },
+        legend: { position: 'bottom' }
+      }
+    }
+  });
+}
 window.setReportChannel = setReportChannel;
 window.generateReport = generateReport;
 </script>
