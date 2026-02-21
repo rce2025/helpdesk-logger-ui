@@ -424,11 +424,50 @@
             align-items: center;
             gap: 4px;
             cursor: default;
+            position: relative;
         }
         .data-loaded-range i {
             font-size: 0.7rem;
         }
         .data-loaded-range:hover {
+            color: var(--text-secondary);
+        }
+        .data-loaded-range .gaps-info-icon {
+            cursor: pointer;
+            color: var(--primary);
+            margin-left: 4px;
+            font-size: 0.65rem;
+            transition: color 0.2s;
+        }
+        .data-loaded-range .gaps-info-icon:hover {
+            color: var(--text-primary);
+        }
+        .data-loaded-range .gaps-popup {
+            display: none;
+            position: absolute;
+            top: 100%;
+            left: 0;
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 8px 12px;
+            font-size: 0.8rem;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            z-index: 10;
+            margin-top: 4px;
+            min-width: 180px;
+            color: var(--text-secondary);
+        }
+        .data-loaded-range .gaps-popup .gaps-popup-title {
+            font-weight: 600;
+            margin-bottom: 4px;
+            font-size: 0.75rem;
+            color: var(--text-primary);
+        }
+        .data-loaded-range .gaps-popup .gaps-popup-interval {
+            padding: 2px 0;
+            padding-left: 8px;
+            font-size: 0.75rem;
             color: var(--text-secondary);
         }
 
@@ -3856,6 +3895,75 @@ function hidePeriodWarning() {
 }
 
 /**
+ * Shared helper to format and display the loaded range with optional gaps info.
+ * Reads the global loadedRanges array to determine intervals.
+ * If there are gaps (loadedRanges.length > 1), shows an info icon that toggles a popup
+ * listing each loaded interval.
+ * @param {HTMLElement} rangeEl - The container element to render into
+ * @param {string} prefix - Icon HTML to prepend (e.g. database icon)
+ */
+function formatLoadedRangeDisplay(rangeEl, prefix) {
+    if (!rangeEl) return;
+
+    var monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+    function formatDateRange(startStr, endStr) {
+        var s = new Date(startStr + 'T00:00:00');
+        var e = new Date(endStr + 'T00:00:00');
+        var sDay = s.getDate(), sMonth = monthNames[s.getMonth()], sYear = s.getFullYear();
+        var eDay = e.getDate(), eMonth = monthNames[e.getMonth()], eYear = e.getFullYear();
+        if (sYear === eYear) {
+            if (sMonth === eMonth && sDay === eDay) {
+                return sDay + ' ' + sMonth + ' ' + sYear;
+            }
+            return sDay + ' ' + sMonth + ' - ' + eDay + ' ' + eMonth + ' ' + eYear;
+        }
+        return sDay + ' ' + sMonth + ' ' + sYear + ' - ' + eDay + ' ' + eMonth + ' ' + eYear;
+    }
+
+    if (!loadedRanges || loadedRanges.length === 0) {
+        rangeEl.innerHTML = '';
+        return;
+    }
+
+    // Outer range: first interval start to last interval end
+    var outerStart = loadedRanges[0].start;
+    var outerEnd = loadedRanges[loadedRanges.length - 1].end;
+    var rangeText = formatDateRange(outerStart, outerEnd);
+
+    var html = prefix + ' ' + rangeText;
+
+    if (loadedRanges.length > 1) {
+        // Build interval lines for the popup
+        var intervalLines = '';
+        for (var i = 0; i < loadedRanges.length; i++) {
+            intervalLines += '<div class="gaps-popup-interval">' +
+                formatDateRange(loadedRanges[i].start, loadedRanges[i].end) +
+                '<\/div>';
+        }
+        var popupId = 'gapsPopup_' + rangeEl.id;
+        html += ' <i class="fas fa-info-circle gaps-info-icon" title="Data has gaps - click for details" onclick="(function(e){e.stopPropagation();var p=document.getElementById(\'' + popupId + '\');p.style.display=p.style.display===\'block\'?\'none\':\'block\';})(event)"><\/i>';
+        html += '<div class="gaps-popup" id="' + popupId + '">' +
+            '<div class="gaps-popup-title">Loaded intervals:<\/div>' +
+            intervalLines +
+            '<\/div>';
+    }
+
+    rangeEl.innerHTML = html;
+
+    // Close popup when clicking outside
+    if (loadedRanges.length > 1) {
+        var popupId2 = 'gapsPopup_' + rangeEl.id;
+        document.addEventListener('click', function closeGapsPopup(evt) {
+            var popup = document.getElementById(popupId2);
+            if (popup && !rangeEl.contains(evt.target)) {
+                popup.style.display = 'none';
+            }
+        });
+    }
+}
+
+/**
  * Update the data loaded range display
  * Shows the CACHED date range (data loaded into memory)
  * This range expands as delta loads occur but never shrinks during the session
@@ -3863,43 +3971,7 @@ function hidePeriodWarning() {
  */
 function updateDataLoadedRange() {
     var rangeEl = document.getElementById('dataLoadedRange');
-    if (!rangeEl) return;
-
-    // Use the cached date range (data that has been loaded into memory)
-    if (!adminCachedStartDate || !adminCachedEndDate) {
-        rangeEl.innerHTML = '';
-        return;
-    }
-
-    // Parse the cached dates (they are in YYYY-MM-DD format)
-    var startDate = new Date(adminCachedStartDate + 'T00:00:00');
-    var endDate = new Date(adminCachedEndDate + 'T00:00:00');
-
-    var monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-    var startDay = startDate.getDate();
-    var startMonth = monthNames[startDate.getMonth()];
-    var startYear = startDate.getFullYear();
-
-    var endDay = endDate.getDate();
-    var endMonth = monthNames[endDate.getMonth()];
-    var endYear = endDate.getFullYear();
-
-    var rangeText;
-    if (startYear === endYear) {
-        // Same year: "3 Jan - 2 Feb 2026"
-        if (startMonth === endMonth && startDay === endDay) {
-            // Same exact date
-            rangeText = startDay + ' ' + startMonth + ' ' + startYear;
-        } else {
-            rangeText = startDay + ' ' + startMonth + ' - ' + endDay + ' ' + endMonth + ' ' + endYear;
-        }
-    } else {
-        // Different years: "1 Nov 2025 - 2 Feb 2026"
-        rangeText = startDay + ' ' + startMonth + ' ' + startYear + ' - ' + endDay + ' ' + endMonth + ' ' + endYear;
-    }
-
-    rangeEl.innerHTML = '<i class="fas fa-database" title="Data loaded in memory"><\/i> ' + rangeText;
+    formatLoadedRangeDisplay(rangeEl, '<i class="fas fa-database" title="Data loaded in memory"><\/i>');
 }
 
 // Update just the message text in loading overlay (minimal DOM update)
@@ -4035,26 +4107,10 @@ async function loginAs(email) {
     const dateRange = getInitialDateRange();
     const worksheetsToLoad = getWorksheetsToLoad();
 
-    var loadResult = await loadCases({
-        startDate: dateRange.startDate,
-        endDate: dateRange.endDate,
-        worksheets: worksheetsToLoad,
-        showProgress: true,
-        progressPrefix: 'Loading cases...'
-    });
-    cases = loadResult.cases;
-
-    // Store cache metadata using ACTUAL dates from existing spreadsheets (not requested dates)
-    // This ensures the data loaded message shows the true range of available data
-    adminCachedStartDate = loadResult.actualStartDate || dateRange.startDate;
-    adminCachedEndDate = loadResult.actualEndDate || dateRange.endDate;
+    await ensureDataLoaded(dateRange.startDate, dateRange.endDate, 'Loading cases...');
+    cases = adminCases; // ensureDataLoaded updates adminCases
     adminCacheTimestamp = Date.now();
     adminCachePeriod = '30days';
-
-    // Keep adminCases in sync for admin users
-    if (isAdmin) {
-        adminCases = cases;
-    }
 
     // Update the data loaded range display
     updateDataLoadedRange();
@@ -4219,7 +4275,7 @@ function performLogoutReset() {
     helpdeskUsers = [];
 
     // Reset cache metadata
-    reportMonthsLoaded = {};
+    resetLoadedRanges();
     adminCachedStartDate = null;
     adminCachedEndDate = null;
     adminCacheTimestamp = null;
@@ -5816,19 +5872,9 @@ async function applyPeriodSelection() {
                 adminReqEndStr = formatLocalDate(adminReqRange.end);
             }
 
-            // Check if data is already cached and covers the requested range
-            if (cases.length > 0 && isDateRangeCovered(adminReqStartStr, adminReqEndStr)) {
-                // Data already available from Dashboard or previous load
-                console.log('Admin: Using existing cached data for requested range');
-                showToast('Using cached data', 'info');
-            } else {
-                // Need to load data - either delta or full
-                console.log('Admin: Need to load data for range', adminReqStartStr, 'to', adminReqEndStr);
-                await loadDeltaData(filterValue, true); // true = admin context
-            }
-
-            // Sync adminCases with cases (they share the same data)
-            adminCases = cases;
+            var loaded = await ensureDataLoaded(adminReqStartStr, adminReqEndStr, 'Loading data...');
+            adminCases = cases; // keep in sync
+            if (!loaded) showToast('Using cached data', 'info');
 
             filterAndRenderAdminCases();
             buildAdminSummaryFromCases();
@@ -5850,16 +5896,8 @@ async function applyPeriodSelection() {
                 reqEndStr = formatLocalDate(reqRange.end);
             }
 
-            // Check if data is already cached and covers the requested range
-            if (cases.length > 0 && isDateRangeCovered(reqStartStr, reqEndStr)) {
-                // Data already available
-                console.log('Dashboard: Using existing cached data for requested range');
-                showToast('Using cached data', 'info');
-            } else {
-                // Need to load data - either delta or full
-                console.log('Dashboard: Need to load data for range', reqStartStr, 'to', reqEndStr);
-                await loadDeltaData(filterValue);
-            }
+            var dashLoaded = await ensureDataLoaded(reqStartStr, reqEndStr, 'Loading data...');
+            if (!dashLoaded) showToast('Using cached data', 'info');
 
             applyFilters();
             updateDataLoadedRange();
@@ -5954,17 +5992,7 @@ function getAdminRequiredDateRange(filter) {
  */
 function updateAdminDataLoadedRange() {
     var rangeEl = document.getElementById('adminDataLoadedRange');
-    if (!rangeEl) return;
-
-    if (adminCachedStartDate && adminCachedEndDate) {
-        var startDate = new Date(adminCachedStartDate);
-        var endDate = new Date(adminCachedEndDate);
-        var startStr = startDate.toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' });
-        var endStr = endDate.toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' });
-        rangeEl.innerHTML = '<i class="fas fa-database"><\/i> Cached: ' + startStr + ' - ' + endStr;
-    } else {
-        rangeEl.innerHTML = '';
-    }
+    formatLoadedRangeDisplay(rangeEl, '<i class="fas fa-database"><\/i> Cached:');
 }
 
 /**
@@ -6058,82 +6086,6 @@ function getRequiredDateRange(filter) {
 }
 
 // Load additional data for periods beyond our cached window
-// Uses unified loadCases() function - same logic for both admin and non-admin
-// isAdminContext parameter indicates whether this is called from admin section (uses adminCustomDateRange)
-async function loadDeltaData(filter, isAdminContext = false) {
-    try {
-        // Use appropriate date range based on context
-        var requiredRange;
-        if (isAdminContext) {
-            requiredRange = getAdminRequiredDateRange(filter);
-        } else {
-            requiredRange = getRequiredDateRange(filter);
-        }
-
-        // Parse cached start date consistently
-        var cachedStartStr = typeof adminCachedStartDate === 'string'
-            ? adminCachedStartDate.slice(0, 10)
-            : formatLocalDate(adminCachedStartDate);
-        var requiredStartStr = formatLocalDate(requiredRange.start);
-        var requiredEndStr = formatLocalDate(requiredRange.end);
-
-        // If required range is within cached range, no need to load more
-        if (requiredStartStr >= cachedStartStr) {
-            console.log('Delta load not needed: required start', requiredStartStr, 'is on or after cached start', cachedStartStr);
-            return;
-        }
-
-        // Calculate delta end date (day before cached start)
-        var cachedStartParts = cachedStartStr.split('-');
-        var cachedStart = new Date(parseInt(cachedStartParts[0]), parseInt(cachedStartParts[1]) - 1, parseInt(cachedStartParts[2]));
-        var deltaEndDate = new Date(cachedStart);
-        deltaEndDate.setDate(deltaEndDate.getDate() - 1);
-
-        var startDate = requiredStartStr;
-        var endDate = formatLocalDate(deltaEndDate);
-
-        console.log('Loading delta data from', startDate, 'to', endDate);
-
-        // Use unified loadCases function - same logic for both admin and non-admin
-        var worksheetsToLoad = getWorksheetsToLoad();
-        console.log('Worksheets to load:', JSON.stringify(worksheetsToLoad));
-
-        var deltaResult = await loadCases({
-            startDate: startDate,
-            endDate: endDate,
-            worksheets: worksheetsToLoad,
-            showProgress: true,
-            progressPrefix: 'Loading additional data...'
-        });
-
-        console.log('Loaded delta cases:', deltaResult.cases.length);
-
-        // Prepend delta cases to existing cases
-        cases = deltaResult.cases.concat(cases);
-
-        // Keep adminCases in sync for Team Breakdown
-        if (isAdmin) {
-            adminCases = cases;
-        }
-
-        // Update cached start date
-        // Use actual date from loaded data if available, otherwise use requested start date
-        // This ensures cache is extended even if no data exists for the period
-        var newStartDate = deltaResult.actualStartDate || startDate;
-        if (!adminCachedStartDate || newStartDate < adminCachedStartDate) {
-            adminCachedStartDate = newStartDate;
-            console.log('Updated adminCachedStartDate to:', adminCachedStartDate);
-        }
-
-        updateDataLoadedRange();
-        showToast('Loaded ' + deltaResult.cases.length + ' additional cases', 'success');
-    } catch (err) {
-        console.error('loadDeltaData error:', err);
-        hideLoadingOverlay();
-        showToast('Error loading additional data: ' + err.message, 'error');
-    }
-}
-
 function getDateRange() {
     const filter = document.getElementById('dateFilter').value, now = new Date(), today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
@@ -8382,32 +8334,6 @@ function isAdminCacheValid() {
     return true; // Cache is fresh, date range check done separately
 }
 
-/**
- * Check if the requested date range is covered by the cached data
- * Returns true if no new data needs to be fetched
- */
-function isDateRangeCovered(requestedStart, requestedEnd) {
-    if (!adminCachedStartDate || !adminCachedEndDate) {
-        console.log('isDateRangeCovered: Cache not initialized', { adminCachedStartDate, adminCachedEndDate });
-        return false;
-    }
-
-    // Normalize to date strings for comparison
-    const reqStartStr = typeof requestedStart === 'string' ? requestedStart.slice(0, 10) : formatLocalDate(requestedStart);
-    const reqEndStr = typeof requestedEnd === 'string' ? requestedEnd.slice(0, 10) : formatLocalDate(requestedEnd);
-    const cachedStartStr = typeof adminCachedStartDate === 'string' ? adminCachedStartDate.slice(0, 10) : formatLocalDate(adminCachedStartDate);
-    const cachedEndStr = typeof adminCachedEndDate === 'string' ? adminCachedEndDate.slice(0, 10) : formatLocalDate(adminCachedEndDate);
-
-    // Check if requested range is within cached range
-    const startCovered = reqStartStr >= cachedStartStr;
-    const endCovered = reqEndStr <= cachedEndStr;
-    const result = startCovered && endCovered;
-
-    console.log('isDateRangeCovered:', { reqStartStr, reqEndStr, cachedStartStr, cachedEndStr, startCovered, endCovered, result, casesCount: cases.length });
-
-    return startCovered && endCovered;
-}
-
 function getAdminCacheAge() {
     if (!adminCacheTimestamp) return null;
     const elapsed = Date.now() - adminCacheTimestamp;
@@ -8419,73 +8345,29 @@ function getAdminCacheAge() {
 async function loadAdminCases(forceRefresh = false) {
     var dateRange = getAdminDateRange();
 
-    // Check if requested date range is already covered by cached data
-    if (!forceRefresh && adminCases.length > 0 && isDateRangeCovered(dateRange.startDate, dateRange.endDate)) {
-        // Use cached data - the requested range is within what we already have
-        console.log('Using cached data - date range is covered');
-        filterAndRenderAdminCases();
-        buildAdminSummaryFromCases();
-        renderUserSummary();
-        updateAdminCacheStatus();
-        updateAdminDataLoadedRange();
+    if (forceRefresh) {
+        resetLoadedRanges();
+        adminCases = [];
+        cases = [];
+    }
+
+    var loaded = await ensureDataLoaded(dateRange.startDate, dateRange.endDate, 'Loading helpdesk cases...');
+    cases = adminCases;
+
+    adminCacheTimestamp = Date.now();
+    adminCachePeriod = document.getElementById('adminPeriodFilter').value;
+    updateDataLoadedRange();
+    updateAdminDataLoadedRange();
+    buildAdminSummaryFromCases();
+    populateColleagueFilter();
+    filterAndRenderAdminCases();
+    renderUserSummary();
+    updateAdminCacheStatus();
+
+    if (loaded) {
+        showToast('Loaded ' + adminCases.length + ' cases', 'success');
+    } else {
         showToast('Using cached data (' + getAdminCacheAge() + ')', 'info');
-        return;
-    }
-
-    // Check if we only need delta load (extend cache backwards)
-    if (!forceRefresh && adminCases.length > 0 && adminCachedStartDate) {
-        const reqStartStr = typeof dateRange.startDate === 'string' ? dateRange.startDate.slice(0, 10) : formatLocalDate(new Date(dateRange.startDate));
-        const cachedStartStr = typeof adminCachedStartDate === 'string' ? adminCachedStartDate.slice(0, 10) : formatLocalDate(adminCachedStartDate);
-
-        if (reqStartStr < cachedStartStr) {
-            // Need to load delta data for earlier period
-            console.log('Loading delta data for admin - extending cache backwards');
-            await loadDeltaData('custom', true); // true = admin context, uses adminCustomDateRange
-            filterAndRenderAdminCases();
-            buildAdminSummaryFromCases();
-            renderUserSummary();
-            updateAdminCacheStatus();
-            updateAdminDataLoadedRange();
-            return;
-        }
-    }
-
-    try {
-        var worksheetsToLoad = getWorksheetsToLoad();
-
-        // Use unified loadCases function - same logic as Dashboard
-        var loadResult = await loadCases({
-            startDate: dateRange.startDate,
-            endDate: dateRange.endDate,
-            worksheets: worksheetsToLoad,
-            showProgress: true,
-            progressPrefix: 'Loading helpdesk cases...'
-        });
-
-        adminCases = loadResult.cases;
-        cases = adminCases; // Keep cases in sync for Dashboard
-
-        // Update cache metadata using ACTUAL dates from existing spreadsheets
-        adminCacheTimestamp = Date.now();
-        adminCachePeriod = document.getElementById('adminPeriodFilter').value;
-        adminCachedStartDate = loadResult.actualStartDate || dateRange.startDate;
-        adminCachedEndDate = loadResult.actualEndDate || dateRange.endDate;
-        updateDataLoadedRange();
-        updateAdminDataLoadedRange();
-
-        // Build summary client-side from loaded cases
-        buildAdminSummaryFromCases();
-
-        // Update colleague filter
-        populateColleagueFilter();
-
-        filterAndRenderAdminCases();
-        renderUserSummary();
-        updateAdminCacheStatus();
-        showToast('Loaded ' + adminCases.length + ' cases from ' + helpdeskUsers.length + ' helpdesk colleagues', 'success');
-    } catch (err) {
-        hideLoadingOverlay();
-        showToast('Error loading admin cases: ' + err.message, 'error');
     }
 }
 
@@ -9072,9 +8954,131 @@ window.performLogoutReset = performLogoutReset;
 window.initGoogleSignIn = initGoogleSignIn;
 window.showLoginError = showLoginError;
 
+// --- Unified Cache: Interval Tracking ---
+var loadedRanges = []; // Array of {start: "YYYY-MM-DD", end: "YYYY-MM-DD"}, sorted, non-overlapping
+
+function addLoadedRange(start, end) {
+    // Normalize to YYYY-MM-DD strings
+    var s = typeof start === 'string' ? start.slice(0, 10) : formatLocalDate(start);
+    var e = typeof end === 'string' ? end.slice(0, 10) : formatLocalDate(end);
+    loadedRanges.push({ start: s, end: e });
+    // Sort by start date
+    loadedRanges.sort(function(a, b) { return a.start < b.start ? -1 : a.start > b.start ? 1 : 0; });
+    // Merge overlapping/adjacent intervals
+    var merged = [];
+    for (var i = 0; i < loadedRanges.length; i++) {
+        var curr = loadedRanges[i];
+        if (merged.length === 0) { merged.push({ start: curr.start, end: curr.end }); continue; }
+        var last = merged[merged.length - 1];
+        // Check if overlapping or adjacent (next day)
+        var lastEndNext = nextDay(last.end);
+        if (curr.start <= lastEndNext) {
+            // Merge: extend end if needed
+            if (curr.end > last.end) last.end = curr.end;
+        } else {
+            merged.push({ start: curr.start, end: curr.end });
+        }
+    }
+    loadedRanges = merged;
+}
+
+function nextDay(dateStr) {
+    var parts = dateStr.split('-');
+    var d = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+    d.setDate(d.getDate() + 1);
+    var mm = String(d.getMonth() + 1).padStart(2, '0');
+    var dd = String(d.getDate()).padStart(2, '0');
+    return d.getFullYear() + '-' + mm + '-' + dd;
+}
+
+function prevDay(dateStr) {
+    var parts = dateStr.split('-');
+    var d = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+    d.setDate(d.getDate() - 1);
+    var mm = String(d.getMonth() + 1).padStart(2, '0');
+    var dd = String(d.getDate()).padStart(2, '0');
+    return d.getFullYear() + '-' + mm + '-' + dd;
+}
+
+function isRangeFullyCovered(start, end) {
+    var s = typeof start === 'string' ? start.slice(0, 10) : formatLocalDate(start);
+    var e = typeof end === 'string' ? end.slice(0, 10) : formatLocalDate(end);
+    for (var i = 0; i < loadedRanges.length; i++) {
+        if (loadedRanges[i].start <= s && loadedRanges[i].end >= e) return true;
+    }
+    return false;
+}
+
+function getUncoveredRanges(start, end) {
+    var s = typeof start === 'string' ? start.slice(0, 10) : formatLocalDate(start);
+    var e = typeof end === 'string' ? end.slice(0, 10) : formatLocalDate(end);
+    var uncovered = [];
+    var cursor = s;
+    for (var i = 0; i < loadedRanges.length; i++) {
+        var r = loadedRanges[i];
+        if (r.end < cursor) continue; // interval is before cursor
+        if (r.start > e) break; // interval is after our range
+        if (r.start > cursor) {
+            // Gap before this interval
+            var gapEnd = r.start > e ? e : prevDay(r.start);
+            if (gapEnd >= cursor) uncovered.push({ start: cursor, end: gapEnd });
+        }
+        // Move cursor past this interval
+        if (r.end >= e) { cursor = nextDay(e); break; }
+        cursor = nextDay(r.end);
+    }
+    // Remaining gap after last interval
+    if (cursor <= e) {
+        uncovered.push({ start: cursor, end: e });
+    }
+    return uncovered;
+}
+
+async function ensureDataLoaded(startDate, endDate, progressPrefix) {
+    var missing = getUncoveredRanges(startDate, endDate);
+    if (missing.length === 0) {
+        console.log('ensureDataLoaded: Range fully covered, using cache');
+        return false; // no new data loaded
+    }
+    console.log('ensureDataLoaded: Loading ' + missing.length + ' missing range(s)');
+    var worksheetsToLoad = getWorksheetsToLoad();
+    for (var i = 0; i < missing.length; i++) {
+        var range = missing[i];
+        console.log('Loading range: ' + range.start + ' to ' + range.end);
+        var loadResult = await loadCases({
+            startDate: range.start,
+            endDate: range.end,
+            worksheets: worksheetsToLoad,
+            showProgress: true,
+            progressPrefix: progressPrefix || 'Loading data...'
+        });
+        if (loadResult.cases && loadResult.cases.length > 0) {
+            // Dedup merge into adminCases
+            var existingIds = {};
+            adminCases.forEach(function(c) { existingIds[c.jobId + '_' + c.worksheet] = true; });
+            var newCases = loadResult.cases.filter(function(c) { return !existingIds[c.jobId + '_' + c.worksheet]; });
+            if (newCases.length > 0) {
+                adminCases = adminCases.concat(newCases);
+                cases = adminCases;
+            }
+        }
+        // Always mark the requested range as loaded (even if no data exists for that period)
+        addLoadedRange(range.start, range.end);
+    }
+    // Update legacy cache boundaries for any code still using them
+    if (loadedRanges.length > 0) {
+        adminCachedStartDate = loadedRanges[0].start;
+        adminCachedEndDate = loadedRanges[loadedRanges.length - 1].end;
+    }
+    return true; // new data was loaded
+}
+
+function resetLoadedRanges() {
+    loadedRanges = [];
+}
+
 // --- Monthly Report ---
 var reportChannel = 'all';
-var reportMonthsLoaded = {};
 var reportCharts = [];
 function destroyReportCharts() {
     reportCharts.forEach(function(c) { if (c) c.destroy(); });
@@ -9111,33 +9115,6 @@ function initReportMonth() {
  * Deduplicates against existing adminCases and updates cache boundaries.
  * Used by both generateReport and loadAdminCases to avoid code duplication.
  */
-async function loadAndMergeDateRange(startDate, endDate, progressPrefix) {
-    var worksheetsToLoad = getWorksheetsToLoad();
-    var loadResult = await loadCases({
-        startDate: startDate,
-        endDate: endDate,
-        worksheets: worksheetsToLoad,
-        showProgress: true,
-        progressPrefix: progressPrefix || 'Loading data...'
-    });
-    if (loadResult.cases && loadResult.cases.length > 0) {
-        var existingIds = {};
-        adminCases.forEach(function(c) { existingIds[c.jobId + '_' + c.worksheet] = true; });
-        var newCases = loadResult.cases.filter(function(c) { return !existingIds[c.jobId + '_' + c.worksheet]; });
-        if (newCases.length > 0) {
-            adminCases = adminCases.concat(newCases);
-            cases = adminCases;
-        }
-        if (loadResult.actualStartDate && (!adminCachedStartDate || loadResult.actualStartDate < adminCachedStartDate)) {
-            adminCachedStartDate = loadResult.actualStartDate;
-        }
-        if (loadResult.actualEndDate && (!adminCachedEndDate || loadResult.actualEndDate > adminCachedEndDate)) {
-            adminCachedEndDate = loadResult.actualEndDate;
-        }
-    }
-    return loadResult;
-}
-
 async function generateReport() {
     var monthVal = document.getElementById('reportMonth').value;
     if (!monthVal) {
@@ -9149,11 +9126,10 @@ async function generateReport() {
     var lastDay = new Date(parseInt(parts[0]), parseInt(parts[1]), 0).getDate();
     var monthEnd = parts[0] + '-' + parts[1] + '-' + String(lastDay).padStart(2, '0');
 
-    if (!reportMonthsLoaded[monthVal]) {
+    if (!isRangeFullyCovered(monthStart, monthEnd)) {
         document.getElementById('reportContent').innerHTML = '<div class="report-placeholder"><i class="fas fa-spinner fa-spin"></i><p>Loading data for ' + monthVal + '...</p></div>';
         try {
-            await loadAndMergeDateRange(monthStart, monthEnd, 'Loading report data...');
-            reportMonthsLoaded[monthVal] = true;
+            await ensureDataLoaded(monthStart, monthEnd, 'Loading report data...');
         } catch (err) {
             document.getElementById('reportContent').innerHTML = '<div class="report-placeholder"><i class="fas fa-exclamation-triangle"></i><p>Error loading data: ' + err.message + '</p></div>';
             return;
