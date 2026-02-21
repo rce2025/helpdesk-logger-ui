@@ -2050,6 +2050,8 @@
         .report-table tr:hover { background: var(--bg-secondary); }
         .report-table .num { text-align: right; font-variant-numeric: tabular-nums; }
         .report-table .total-row { font-weight: 700; background: var(--bg-tertiary); }
+        .report-table tbody tr:nth-child(even) { background: rgba(0,0,0,0.03); }
+        .dark .report-table tbody tr:nth-child(even) { background: rgba(255,255,255,0.05); }
         .report-table-wrapper { overflow-x: auto; border-radius: var(--radius-md); border: 1px solid var(--border-color); }
         .kpi-status-meet { color: var(--success); font-weight: 600; }
         .kpi-status-below { color: var(--danger); font-weight: 600; }
@@ -9100,7 +9102,7 @@ async function generateReport() {
         var loadResult = await loadCases({
             startDate: monthStart,
             endDate: monthEnd,
-            worksheets: currentUser.worksheets || [],
+            worksheets: getWorksheetsToLoad(),
             showProgress: true,
             progressPrefix: 'Loading report data...'
         });
@@ -9190,7 +9192,7 @@ function getGroupDuration(rootCase) {
     var related = getRelatedCases(rootCase);
     var total = 0;
     related.forEach(function(c) {
-        total += parseInt(c.duration) || 0;
+        total += parseInt(c.durationMins) || 0;
     });
     return total;
 }
@@ -9430,14 +9432,14 @@ function renderDailyBreakdown(data) {
     data.roots.forEach(function(root) {
         var related = getRelatedCases(root);
         related.forEach(function(c) {
-            var caseKey = c.jobId + '|' + (c.createDate || '') + '|' + (c.duration || 0) + '|' + (c.channel || '') + '|' + (c.followUpJobId || '');
+            var caseKey = c.jobId + '|' + (c.createDate || '') + '|' + (c.durationMins || 0) + '|' + (c.channel || '') + '|' + (c.followUpJobId || '');
             if (seenIds[caseKey]) return;
             seenIds[caseKey] = true;
             if (c.createDate && c.createDate.indexOf(monthPrefix) === 0) {
                 var dayNum = parseInt(c.createDate.substring(8, 10));
                 if (dayNum >= 1 && dayNum <= daysInMonth) {
                     dailyCountsDedup[dayNum]++;
-                    dailyDurationsDedup[dayNum] += parseInt(c.duration) || 0;
+                    dailyDurationsDedup[dayNum] += parseInt(c.durationMins) || 0;
                 }
             }
         });
@@ -9494,14 +9496,14 @@ function renderDailyBreakdownChart(data) {
     data.roots.forEach(function(root) {
         var related = getRelatedCases(root);
         related.forEach(function(c) {
-            var caseKey = c.jobId + '|' + (c.createDate || '') + '|' + (c.duration || 0) + '|' + (c.channel || '') + '|' + (c.followUpJobId || '');
+            var caseKey = c.jobId + '|' + (c.createDate || '') + '|' + (c.durationMins || 0) + '|' + (c.channel || '') + '|' + (c.followUpJobId || '');
             if (seenIds[caseKey]) return;
             seenIds[caseKey] = true;
             if (c.createDate && c.createDate.indexOf(monthPrefix) === 0) {
                 var dayNum = parseInt(c.createDate.substring(8, 10));
                 if (dayNum >= 1 && dayNum <= daysInMonth) {
                     dailyCounts[dayNum]++;
-                    dailyDurations[dayNum] += parseInt(c.duration) || 0;
+                    dailyDurations[dayNum] += parseInt(c.durationMins) || 0;
                 }
             }
         });
@@ -9568,7 +9570,7 @@ function renderTop10Subcategory(data) {
     var counts = {};
     var durations = {};
     data.roots.forEach(function(root) {
-        var sc = root.subCategory || 'Unknown';
+        var sc = root.subcategory || 'Unknown';
         counts[sc] = (counts[sc] || 0) + 1;
         durations[sc] = (durations[sc] || 0) + getGroupDuration(root);
     });
@@ -9577,13 +9579,13 @@ function renderTop10Subcategory(data) {
     });
     sorted.sort(function(a, b) { return b.count - a.count; });
     var top10 = sorted.slice(0, 10);
-    var html = '<div class="section-card"><div class="section-title"><i class="fas fa-tags" style="color:var(--primary)"></i> Top 10 Subcategory</div>';
-    html += '<table><thead><tr><th>Rank</th><th>Subcategory</th><th>Cases</th><th>Total Duration (min)</th><th>Avg Duration (min)</th></tr></thead><tbody>';
+    var html = '<div class="report-section"><div class="report-section-title"><i class="fas fa-tags" style="color:var(--primary)"></i> Top 10 System</div>';
+    html += '<div class="report-table-wrapper"><table class="report-table"><thead><tr><th>Rank</th><th>Subcategory</th><th class="num">Cases</th><th class="num">Total Duration (min)</th><th class="num">Avg Duration (min)</th></tr></thead><tbody>';
     top10.forEach(function(item, idx) {
         var avg = item.count > 0 ? (item.totalDuration / item.count).toFixed(1) : '0.0';
-        html += '<tr><td>' + (idx + 1) + '</td><td>' + item.subCategory + '</td><td>' + item.count + '</td><td>' + item.totalDuration + '</td><td>' + avg + '</td></tr>';
+        html += '<tr><td>' + (idx + 1) + '</td><td>' + item.subCategory + '</td><td class="num">' + item.count + '</td><td class="num">' + item.totalDuration + '</td><td class="num">' + avg + '</td></tr>';
     });
-    html += '</tbody></table>';
+    html += '</tbody></table></div>';
     html += '<div style="max-width:700px;margin:18px auto 0"><canvas id="top10SubcatChart"></canvas></div>';
     html += '</div>';
     return html;
@@ -9594,7 +9596,7 @@ function renderTop10SubcatChart(data) {
     if (!canvas) return;
     var counts = {};
     data.roots.forEach(function(root) {
-        var sc = root.subCategory || 'Unknown';
+        var sc = root.subcategory || 'Unknown';
         counts[sc] = (counts[sc] || 0) + 1;
     });
     var sorted = Object.keys(counts).map(function(sc) {
@@ -9619,7 +9621,7 @@ function renderTop10SubcatChart(data) {
         options: {
             indexAxis: 'y',
             plugins: {
-                title: { display: true, text: 'Top 10 Subcategory by Cases' },
+                title: { display: true, text: 'Top 10 System by Cases' },
                 legend: { position: 'bottom' }
             },
             scales: {
@@ -9631,7 +9633,7 @@ function renderTop10SubcatChart(data) {
 function renderTop10CategoryPath(data) {
     var pathMap = {};
     (data.roots || []).forEach(function(root) {
-        var path = (root.category || 'Unknown') + ' > ' + (root.subCategory || 'Unknown');
+        var path = '[' + (root.category || 'Unknown') + '] ' + (root.subcategory || 'Unknown') + ' - ' + (root.subject || 'Unknown');
         if (!pathMap[path]) {
             pathMap[path] = { count: 0, totalDuration: 0 };
         }
@@ -9641,14 +9643,15 @@ function renderTop10CategoryPath(data) {
     var sorted = Object.keys(pathMap).map(function(p) {
         return { path: p, count: pathMap[p].count, totalDuration: pathMap[p].totalDuration };
     }).sort(function(a, b) { return b.count - a.count; }).slice(0, 10);
-    var html = '<div class="section-title" style="margin-top:32px;"><i class="fas fa-sitemap" style="color:var(--secondary);margin-right:8px;"></i>Top 10 Category Path</div>';
-    html += '<table><thead><tr><th>Rank</th><th>Category Path</th><th>Cases</th><th>Total Duration (min)</th><th>Avg Duration (min)</th></tr></thead><tbody>';
+    var html = '<div class="report-section"><div class="report-section-title"><i class="fas fa-sitemap" style="color:var(--secondary)"></i> Top 10 Category</div>';
+    html += '<div class="report-table-wrapper"><table class="report-table"><thead><tr><th>Rank</th><th>Category Path</th><th class="num">Cases</th><th class="num">Total Duration (min)</th><th class="num">Avg Duration (min)</th></tr></thead><tbody>';
     sorted.forEach(function(item, i) {
         var avg = item.count > 0 ? (item.totalDuration / item.count).toFixed(1) : '0.0';
-        html += '<tr><td>' + (i + 1) + '</td><td>' + item.path + '</td><td>' + item.count + '</td><td>' + item.totalDuration.toFixed(1) + '</td><td>' + avg + '</td></tr>';
+        html += '<tr><td>' + (i + 1) + '</td><td>' + item.path + '</td><td class="num">' + item.count + '</td><td class="num">' + item.totalDuration.toFixed(1) + '</td><td class="num">' + avg + '</td></tr>';
     });
-    html += '</tbody></table>';
+    html += '</tbody></table></div>';
     html += '<div style="max-width:700px;margin:18px auto 0"><canvas id="top10CatPathChart"></canvas></div>';
+    html += '</div>';
     return html;
 }
 function renderTop10CatPathChart(data) {
@@ -9656,7 +9659,7 @@ function renderTop10CatPathChart(data) {
     if (!canvas) return;
     var pathMap = {};
     (data.roots || []).forEach(function(root) {
-        var path = (root.category || 'Unknown') + ' > ' + (root.subCategory || 'Unknown');
+        var path = '[' + (root.category || 'Unknown') + '] ' + (root.subcategory || 'Unknown') + ' - ' + (root.subject || 'Unknown');
         if (!pathMap[path]) {
             pathMap[path] = 0;
         }
@@ -9680,7 +9683,7 @@ function renderTop10CatPathChart(data) {
         options: {
             indexAxis: 'y',
             plugins: {
-                title: { display: true, text: 'Top 10 Category Path by Cases' },
+                title: { display: true, text: 'Top 10 Category by Cases' },
                 legend: { position: 'bottom' }
             },
             scales: {
@@ -9706,15 +9709,15 @@ function renderCategoryBreakdown(data) {
   const sorted = Object.keys(catMap).map(function(k) {
     return { category: k, count: catMap[k].count, duration: catMap[k].duration };
   }).sort(function(a, b) { return b.count - a.count; });
-  let html = '<div class="section-block"><h2 style="display:flex;align-items:center;gap:10px"><span class="section-icon" style="background:var(--warning)"><i class="fas fa-folder-open"></i></span>Cases &amp; Duration by Category</h2>';
-  html += '<div class="table-responsive"><table><thead><tr><th>Category</th><th>Cases</th><th>Total Duration (min)</th><th>Avg Duration (min)</th><th>% of Total Cases</th></tr></thead><tbody>';
+  let html = '<div class="report-section"><div class="report-section-title"><i class="fas fa-folder-open" style="color:var(--warning)"></i> Cases &amp; Duration by Category</div>';
+  html += '<div class="report-table-wrapper"><table class="report-table"><thead><tr><th>Category</th><th class="num">Cases</th><th class="num">Total Duration (min)</th><th class="num">Avg Duration (min)</th><th class="num">% of Total Cases</th></tr></thead><tbody>';
   sorted.forEach(function(row) {
     const avg = row.count > 0 ? (row.duration / row.count).toFixed(2) : '0.00';
     const pct = totalCases > 0 ? ((row.count / totalCases) * 100).toFixed(1) : '0.0';
-    html += '<tr><td>' + row.category + '</td><td>' + row.count + '</td><td>' + row.duration.toFixed(2) + '</td><td>' + avg + '</td><td>' + pct + '%</td></tr>';
+    html += '<tr><td>' + row.category + '</td><td class="num">' + row.count + '</td><td class="num">' + row.duration.toFixed(2) + '</td><td class="num">' + avg + '</td><td class="num">' + pct + '%</td></tr>';
   });
   const totalAvg = totalCases > 0 ? (totalDuration / totalCases).toFixed(2) : '0.00';
-  html += '<tr style="font-weight:bold;background:#f0f0f0"><td>Total</td><td>' + totalCases + '</td><td>' + totalDuration.toFixed(2) + '</td><td>' + totalAvg + '</td><td>100.0%</td></tr>';
+  html += '<tr class="total-row"><td>Total</td><td class="num">' + totalCases + '</td><td class="num">' + totalDuration.toFixed(2) + '</td><td class="num">' + totalAvg + '</td><td class="num">100.0%</td></tr>';
   html += '</tbody></table></div>';
   html += '<div style="max-width:700px;margin:18px auto 0"><canvas id="categoryBreakdownChart"></canvas></div>';
   html += '</div>';
@@ -9789,42 +9792,43 @@ function renderCategoryBreakdownChart(data) {
 function renderTimePeriodBreakdown(data) {
   const roots = data.roots || [];
   const periods = [
-    {name:'Morning',start:6,end:11},
-    {name:'Afternoon',start:12,end:17},
-    {name:'Evening',start:18,end:23},
-    {name:'Night',start:0,end:5}
+    {name: 'Mon - Fri 09:00 - 18:00', startH: 9, endH: 17, weekday: true},
+    {name: 'Mon - Fri 18:00 - 23:59', startH: 18, endH: 23, weekday: true},
+    {name: 'Weekend 09:00 - 23:59', startH: 9, endH: 23, weekday: false}
   ];
-  const periodStats = periods.map(p => ({name:p.name, start:p.start, end:p.end, count:0, totalDuration:0}));
+  const periodStats = periods.map(p => ({name:p.name, startH:p.startH, endH:p.endH, weekday:p.weekday, count:0, totalDuration:0}));
   roots.forEach(root => {
-    const ct = root.createTime || '';
-    const parts = ct.split(':');
+    const sdt = root.startDateTime || ''; const tPart = sdt.indexOf('T') >= 0 ? sdt.split('T')[1] : '';
+    const parts = tPart.split(':');
     if (parts.length < 2) return;
     const hour = parseInt(parts[0], 10);
     if (isNaN(hour)) return;
+    const cd = root.createDate || '';
+    const dateObj = new Date(cd);
+    if (isNaN(dateObj.getTime())) return;
+    const dow = dateObj.getDay();
+    const isWeekend = (dow === 0 || dow === 6);
     const dur = getGroupDuration(root);
-    for (const ps of periodStats) {
-      if (ps.start <= ps.end) {
-        if (hour >= ps.start && hour <= ps.end) { ps.count++; ps.totalDuration += dur; break; }
-      } else {
-        if (hour >= ps.start || hour <= ps.end) { ps.count++; ps.totalDuration += dur; break; }
-      }
+    if (isWeekend && hour >= 9 && hour <= 23) {
+      periodStats[2].count++; periodStats[2].totalDuration += dur;
+    } else if (!isWeekend && hour >= 9 && hour <= 17) {
+      periodStats[0].count++; periodStats[0].totalDuration += dur;
+    } else if (!isWeekend && hour >= 18 && hour <= 23) {
+      periodStats[1].count++; periodStats[1].totalDuration += dur;
     }
   });
   const totalCases = periodStats.reduce((s,p) => s + p.count, 0);
   const totalDur = periodStats.reduce((s,p) => s + p.totalDuration, 0);
-  let html = '<div class="section-block" style="border-left:4px solid #8b5cf6">';
-  html += '<h2 style="color:#8b5cf6"><i class="fas fa-clock"></i> Cases &amp; Duration by Time Period</h2>';
-  html += '<table><thead><tr><th>Time Period</th><th>Time Range</th><th>Cases</th><th>Total Duration (min)</th><th>Avg Duration (min)</th><th>% of Total</th></tr></thead><tbody>';
+  let html = '<div class="report-section"><div class="report-section-title"><i class="fas fa-clock" style="color:#8b5cf6"></i> Cases &amp; Duration by Time Period</div>';
+  html += '<div class="report-table-wrapper"><table class="report-table"><thead><tr><th>Time Period</th><th class="num">Cases</th><th class="num">Total Duration (min)</th><th class="num">Avg Duration (min)</th><th class="num">% of Total</th></tr></thead><tbody>';
   periodStats.forEach(ps => {
-    const startStr = String(ps.start).padStart(2,'0') + ':00';
-    const endStr = String(ps.end).padStart(2,'0') + ':59';
     const avg = ps.count > 0 ? (ps.totalDuration / ps.count).toFixed(1) : '0.0';
     const pct = totalCases > 0 ? ((ps.count / totalCases) * 100).toFixed(1) : '0.0';
-    html += '<tr><td>' + ps.name + '</td><td>' + startStr + '-' + endStr + '</td><td>' + ps.count + '</td><td>' + ps.totalDuration.toFixed(1) + '</td><td>' + avg + '</td><td>' + pct + '%</td></tr>';
+    html += '<tr><td>' + ps.name + '</td><td class="num">' + ps.count + '</td><td class="num">' + ps.totalDuration.toFixed(1) + '</td><td class="num">' + avg + '</td><td class="num">' + pct + '%</td></tr>';
   });
   const totalAvg = totalCases > 0 ? (totalDur / totalCases).toFixed(1) : '0.0';
-  html += '<tr style="font-weight:bold;background:#f0f0f0"><td>Total</td><td>-</td><td>' + totalCases + '</td><td>' + totalDur.toFixed(1) + '</td><td>' + totalAvg + '</td><td>100.0%</td></tr>';
-  html += '</tbody></table>';
+  html += '<tr class="total-row"><td>Total</td><td class="num">' + totalCases + '</td><td class="num">' + totalDur.toFixed(1) + '</td><td class="num">' + totalAvg + '</td><td class="num">100.0%</td></tr>';
+  html += '</tbody></table></div>';
   html += '<div style="max-width:500px;margin:18px auto 0"><canvas id="timePeriodChart"></canvas></div>';
   html += '</div>';
   return html;
@@ -9834,35 +9838,33 @@ function renderTimePeriodChart(data) {
   const canvas = document.getElementById('timePeriodChart');
   if (!canvas) return;
   const roots = data.roots || [];
-  const periods = [
-    {name:'Morning',start:6,end:11},
-    {name:'Afternoon',start:12,end:17},
-    {name:'Evening',start:18,end:23},
-    {name:'Night',start:0,end:5}
-  ];
-  const counts = [0,0,0,0];
+  const counts = [0,0,0];
   roots.forEach(root => {
-    const ct = root.createTime || '';
-    const parts = ct.split(':');
+    const sdt = root.startDateTime || ''; const tPart = sdt.indexOf('T') >= 0 ? sdt.split('T')[1] : '';
+    const parts = tPart.split(':');
     if (parts.length < 2) return;
     const hour = parseInt(parts[0], 10);
     if (isNaN(hour)) return;
-    for (let i = 0; i < periods.length; i++) {
-      const p = periods[i];
-      if (p.start <= p.end) {
-        if (hour >= p.start && hour <= p.end) { counts[i]++; break; }
-      } else {
-        if (hour >= p.start || hour <= p.end) { counts[i]++; break; }
-      }
+    const cd = root.createDate || '';
+    const dateObj = new Date(cd);
+    if (isNaN(dateObj.getTime())) return;
+    const dow = dateObj.getDay();
+    const isWeekend = (dow === 0 || dow === 6);
+    if (isWeekend && hour >= 9 && hour <= 23) {
+      counts[2]++;
+    } else if (!isWeekend && hour >= 9 && hour <= 17) {
+      counts[0]++;
+    } else if (!isWeekend && hour >= 18 && hour <= 23) {
+      counts[1]++;
     }
   });
   new Chart(canvas.getContext('2d'), {
     type: 'doughnut',
     data: {
-      labels: ['Morning','Afternoon','Evening','Night'],
+      labels: ['Mon - Fri 09:00 - 18:00','Mon - Fri 18:00 - 23:59','Weekend 09:00 - 23:59'],
       datasets: [{
         data: counts,
-        backgroundColor: ['#f59e0b','#3b82f6','#8b5cf6','#1e293b']
+        backgroundColor: ['#3b82f6','#8b5cf6','#f59e0b']
       }]
     },
     options: {
