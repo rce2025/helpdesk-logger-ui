@@ -2940,7 +2940,7 @@
                                 <div class="form-section-divider"><span>Contact Information</span></div>
                                 <div class="form-group"><label class="form-label">Contact Person</label><input type="text" class="form-input" id="contactPerson" maxlength="50" placeholder="e.g. Mr. John Cheung" onblur="formatContactPerson(this)"></div>
                                 <div class="form-group"><label class="form-label">Tel No. <span class="required">*</span></label><input type="tel" class="form-input" id="telNo" placeholder="e.g. 9876-5432" maxlength="9" onblur="formatTelNo(this)" oninput="formatTelNoInput(this)"></div>
-                                <div class="form-group"><label class="form-label">Agent Code</label><input type="text" class="form-input uppercase-input" id="agentCode" placeholder="e.g. Z0S123" maxlength="6"></div>
+                                <div class="form-group"><label class="form-label">Agent Code</label><input type="text" class="form-input uppercase-input" id="agentCode" placeholder="e.g. Z0S123" maxlength="10"></div>
                                 <div class="form-group"><label class="form-label">Location (if on-site)</label><select class="form-select" id="location"><option value="">Not required</option><option value="MU Tower">MU Tower</option><option value="Harbour Front">Harbour Front</option><option value="Gateway">Gateway</option><option value="Other">Other</option></select></div>
                                 <div class="form-section-divider"><span>Case Classification</span><button type="button" class="classification-helper-btn" onclick="showClassificationWizard()"><i class="fas fa-magic"></i> Helper</button></div>
                                 <div class="templates-inline" id="templatesSection">
@@ -3289,6 +3289,8 @@ const GOOGLE_CLIENT_ID = '891866104091-i9fkn42vbnrd368imrnq186mlb6m00sn.apps.goo
 
 // Google credential token - set after sign-in, sent with every API call
 var googleCredential = null;
+var tokenExpiresAt = 0;
+var sessionCheckInterval = null;
 
 // User management - will be loaded from API
 let USERS = [];
@@ -3505,6 +3507,8 @@ async function handleGoogleSignIn(response) {
         // Decode the JWT to get user info
         var payload = JSON.parse(atob(response.credential.split('.')[1]));
         var email = payload.email;
+        // Store token expiry time (exp is in seconds, convert to ms)
+        tokenExpiresAt = (payload.exp || 0) * 1000;
 
         // Now load users and worksheets from API (token is required)
         showLoadingOverlay('Verifying access...');
@@ -3565,28 +3569,73 @@ function showLoginError(message) {
     statusEl.innerHTML = '<div style="padding: 12px 16px; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); border-radius: 8px; color: var(--danger); font-size: 0.85rem; text-align: center;"><i class="fas fa-exclamation-circle"><\/i> ' + message + '<\/div>';
 }
 
+// Timeout retry dialog
+function showTimeoutRetryDialog(message, onRetry) {
+    var overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:10000;';
+    var modal = document.createElement('div');
+    modal.style.cssText = 'background:var(--bg-primary);border-radius:12px;padding:24px;max-width:340px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,0.3);text-align:center;';
+    modal.innerHTML = '<div style="font-size:2rem;margin-bottom:12px;">⏱️</div>' +
+        '<div style="color:var(--text-primary);font-size:0.95rem;margin-bottom:20px;line-height:1.5;">' + message + '</div>' +
+        '<div style="display:flex;gap:12px;justify-content:center;">' +
+        '<button id="timeoutCancelBtn" style="padding:8px 20px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-secondary);color:var(--text-secondary);cursor:pointer;font-size:0.9rem;">Cancel</button>' +
+        '<button id="timeoutRetryBtn" style="padding:8px 20px;border-radius:8px;border:none;background:var(--accent-primary);color:#fff;cursor:pointer;font-size:0.9rem;font-weight:600;">Retry</button>' +
+        '</div>';
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+    document.getElementById('timeoutCancelBtn').onclick = function() { overlay.remove(); };
+    document.getElementById('timeoutRetryBtn').onclick = function() { overlay.remove(); if (onRetry) onRetry(); };
+}
+
 // API Helper functions
-async function apiGet(action, params = {}) {
+var API_TIMEOUT_DEFAULT = 120000; // 2 minutes default for most API calls
+
+async function apiGet(action, params = {}, options = {}) {
     const url = new URL(API_URL);
     if (googleCredential) url.searchParams.append('token', googleCredential);
     url.searchParams.append('action', action);
     Object.keys(params).forEach(key => url.searchParams.append(key, params[key]));
 
-    const response = await fetch(url.toString(), {
-        method: 'GET',
-        redirect: 'follow',
-        referrerPolicy: 'no-referrer',
-        cache: 'no-store'
-    });
-    var result = await response.json();
-    if (result && result.error === 'Token expired') {
-        handleSessionExpired();
-        throw new Error('Session expired');
+    var timeoutMs = options.timeout || API_TIMEOUT_DEFAULT;
+    var controller = new AbortController();
+    var timeoutId = setTimeout(function() { controller.abort(); }, timeoutMs);
+    try {
+        var response = await fetch(url.toString(), {
+            method: 'GET',
+            redirect: 'follow',
+            referrerPolicy: 'no-referrer',
+            cache: 'no-store',
+            signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+        // Check for non-JSON responses (Google auth redirect)
+        var contentType = response.headers.get('content-type') || '';
+        if (!contentType.includes('application/json') && !contentType.includes('text/javascript')) {
+            // Likely redirected to Google login page
+            handleSessionExpired();
+            throw new Error('Session expired');
+        }
+        var result = await response.json();
+        if (result && result.error === 'Token expired') {
+            handleSessionExpired();
+            throw new Error('Session expired');
+        }
+        if (result && result.error && (result.error.toLowerCase().includes('authorization') || result.error.toLowerCase().includes('auth') || result.error.toLowerCase().includes('permission') || result.error.toLowerCase().includes('login'))) {
+            handleSessionExpired();
+            throw new Error('Session expired');
+        }
+        return result;
+    } catch (err) {
+        clearTimeout(timeoutId);
+        if (err.name === 'AbortError') {
+            throw new Error('REQUEST_TIMEOUT');
+        }
+        throw err;
     }
-    return result;
 }
 
-async function apiPost(action, data, params = {}) {
+async function apiPost(action, data, params = {}, options = {}) {
     // Google Apps Script has CORS issues with POST from different origins
     // Use GET with data encoded in URL as a workaround
     const url = new URL(API_URL);
@@ -3595,24 +3644,79 @@ async function apiPost(action, data, params = {}) {
     Object.keys(params).forEach(key => url.searchParams.append(key, params[key]));
     url.searchParams.append('postData', JSON.stringify(data));
 
-    const response = await fetch(url.toString(), {
-        method: 'GET',
-        redirect: 'follow',
-        referrerPolicy: 'no-referrer',
-        cache: 'no-store'
-    });
-    var result = await response.json();
-    if (result && result.error === 'Token expired') {
-        handleSessionExpired();
-        throw new Error('Session expired');
+    var timeoutMs = options.timeout || API_TIMEOUT_DEFAULT;
+    var controller = new AbortController();
+    var timeoutId = setTimeout(function() { controller.abort(); }, timeoutMs);
+    try {
+        var response = await fetch(url.toString(), {
+            method: 'GET',
+            redirect: 'follow',
+            referrerPolicy: 'no-referrer',
+            cache: 'no-store',
+            signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+        // Check for non-JSON responses (Google auth redirect)
+        var contentType = response.headers.get('content-type') || '';
+        if (!contentType.includes('application/json') && !contentType.includes('text/javascript')) {
+            handleSessionExpired();
+            throw new Error('Session expired');
+        }
+        var result = await response.json();
+        if (result && result.error === 'Token expired') {
+            handleSessionExpired();
+            throw new Error('Session expired');
+        }
+        if (result && result.error && (result.error.toLowerCase().includes('authorization') || result.error.toLowerCase().includes('auth') || result.error.toLowerCase().includes('permission') || result.error.toLowerCase().includes('login'))) {
+            handleSessionExpired();
+            throw new Error('Session expired');
+        }
+        return result;
+    } catch (err) {
+        clearTimeout(timeoutId);
+        if (err.name === 'AbortError') {
+            throw new Error('REQUEST_TIMEOUT');
+        }
+        throw err;
     }
-    return result;
+}
+
+function isTokenExpired() {
+    if (!googleCredential || !tokenExpiresAt) return true;
+    // Consider expired 60 seconds before actual expiry to avoid edge cases
+    return Date.now() >= (tokenExpiresAt - 60000);
+}
+
+function checkSessionAlive() {
+    if (!currentUser || !googleCredential) return;
+    if (isTokenExpired()) {
+        saveFormState();
+        handleSessionExpired();
+    }
+}
+
+function startSessionHeartbeat() {
+    stopSessionHeartbeat();
+    // Check every 5 minutes
+    sessionCheckInterval = setInterval(function() {
+        checkSessionAlive();
+    }, 5 * 60 * 1000);
+}
+
+function stopSessionHeartbeat() {
+    if (sessionCheckInterval) {
+        clearInterval(sessionCheckInterval);
+        sessionCheckInterval = null;
+    }
 }
 
 function handleSessionExpired() {
     // Prevent showing multiple times
     if (document.getElementById('sessionExpiredOverlay').classList.contains('show')) return;
+    saveFormState();
     googleCredential = null;
+    tokenExpiresAt = 0;
+    stopSessionHeartbeat();
     hideLoadingOverlay();
     document.getElementById('sessionExpiredOverlay').classList.add('show');
 }
@@ -4081,6 +4185,15 @@ async function loginAs(email) {
     currentUser = { name: user.name, initials: user.initials, email: user.email, role: user.role, worksheet: user.worksheet || '' };
     document.getElementById('loginScreen').style.display = 'none';
     document.getElementById('appContainer').classList.add('show');
+    // Start session heartbeat
+    startSessionHeartbeat();
+    // Restore form state if returning from session expiry
+    if (savedFormState) {
+        setTimeout(function() {
+            showView('newCase', true);
+            setTimeout(function() { restoreFormState(); showToast('Your previous form data has been restored', 'success'); }, 150);
+        }, 300);
+    }
     document.getElementById('userAvatar').textContent = user.initials;
     document.getElementById('userName').textContent = user.name;
 
@@ -7262,6 +7375,13 @@ async function saveCase(event) {
     const actionResultVal = document.getElementById('actionResult').value;
     if (!actionResultVal) { highlightAndFocus('actionResult'); showToast('Please select a Case Status', 'error'); resetSaveBtn(); return; }
 
+    var agentCodeVal = document.getElementById('agentCode').value.trim();
+    if (agentCodeVal && agentCodeVal.length < 6) {
+        showToast('Agent Code must be at least 6 characters', 'error');
+        document.getElementById('agentCode').focus();
+        return;
+    }
+
     const isNewJob = document.getElementById('isNewJob').value, originalJobId = document.getElementById('originalJobId').value, editingId = document.getElementById('editingCaseId').value;
     const startDT = `${callDate}T${startTime}`;
     const endDT = `${callDate}T${endTime}`;
@@ -7395,11 +7515,20 @@ async function saveCase(event) {
             showToast(`Case ${serverJobId} saved!`, 'success');
             clearForm(); updateStats(); showView('dashboard');
         }
-    } catch (error) {
+    } catch (err) {
         hideLoadingOverlay();
-        resetSaveBtn();
-        console.error('API error saving case:', error);
-        showToast('Failed to connect to server', 'error');
+        // Re-enable save button
+        var saveBtnEl = document.getElementById('btnSaveCase');
+        if (saveBtnEl) { saveBtnEl.disabled = false; saveBtnEl.innerHTML = '<i class="fas fa-save"></i> Save Case'; }
+
+        if (err.message === 'REQUEST_TIMEOUT') {
+            showTimeoutRetryDialog('Save timed out. The server may be busy. Would you like to retry?', function() {
+                // Re-trigger save
+                document.getElementById('caseForm').dispatchEvent(new Event('submit', { cancelable: true }));
+            });
+        } else if (err.message !== 'Session expired') {
+            showToast('Error saving case: ' + err.message, 'error');
+        }
     }
 }
 
@@ -8865,11 +8994,113 @@ window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', eve
 document.addEventListener('DOMContentLoaded', init);
 
 // iOS Safari fix: Reinitialize dropdowns when page becomes visible again after switching apps
+var savedFormState = null;
+
+function saveFormState() {
+    var formView = document.getElementById('newCaseView');
+    if (!formView || !formView.classList.contains('active')) return;
+    savedFormState = {
+        callDate: document.getElementById('callDate').value,
+        startTime: document.getElementById('startTime').value,
+        endTime: document.getElementById('endTime').value,
+        duration: document.getElementById('duration').value,
+        source: document.getElementById('source').value,
+        channel: document.getElementById('channel').value,
+        contactPerson: document.getElementById('contactPerson').value,
+        telNo: document.getElementById('telNo').value,
+        agentCode: document.getElementById('agentCode').value,
+        location: document.getElementById('location').value,
+        caseType: document.getElementById('caseType').value,
+        category: document.getElementById('category').value,
+        subcategory: document.getElementById('subcategory').value,
+        subject: document.getElementById('subject').value,
+        symptom: document.getElementById('symptom').value,
+        actionDetail: document.getElementById('actionDetail').value,
+        escalateTicket: document.getElementById('escalateTicket').value,
+        actionResult: document.getElementById('actionResult').value,
+        isNewJob: document.getElementById('isNewJob').value,
+        originalJobId: document.getElementById('originalJobId').value,
+        editingCaseId: document.getElementById('editingCaseId').value,
+        isEditMode: isEditMode,
+        editingJobId: editingJobId,
+        formTitle: document.getElementById('formTitle').textContent,
+        jobIdHeaderDisplay: document.getElementById('jobIdHeader').style.display,
+        jobIdHeaderText: document.getElementById('jobIdHeader').textContent
+    };
+}
+
+function restoreFormState() {
+    if (!savedFormState) return;
+    var s = savedFormState;
+    var formView = document.getElementById('newCaseView');
+    if (!formView || !formView.classList.contains('active')) return;
+
+    document.getElementById('callDate').value = s.callDate;
+    document.getElementById('startTime').value = s.startTime;
+    document.getElementById('endTime').value = s.endTime;
+    document.getElementById('duration').value = s.duration;
+    document.getElementById('contactPerson').value = s.contactPerson;
+    document.getElementById('telNo').value = s.telNo;
+    document.getElementById('agentCode').value = s.agentCode;
+    document.getElementById('location').value = s.location;
+    document.getElementById('symptom').value = s.symptom;
+    document.getElementById('actionDetail').value = s.actionDetail;
+    document.getElementById('escalateTicket').value = s.escalateTicket;
+    document.getElementById('isNewJob').value = s.isNewJob;
+    document.getElementById('originalJobId').value = s.originalJobId;
+    document.getElementById('editingCaseId').value = s.editingCaseId;
+
+    // Restore channel selection
+    if (s.channel) {
+        selectChannel(s.channel);
+    }
+
+    // Restore custom dropdowns
+    setCustomDropdownValue('source', s.source);
+    setCustomDropdownValue('caseType', s.caseType);
+    setCustomDropdownValue('category', s.category);
+    // Need to update subcategory options before setting value
+    updateSubcategories(false);
+    setCustomDropdownValue('subcategory', s.subcategory);
+    updateSubjects(false);
+    setCustomDropdownValue('subject', s.subject);
+    setCustomDropdownValue('actionResult', s.actionResult);
+    toggleEscalateField();
+
+    // Restore edit mode state
+    isEditMode = s.isEditMode;
+    editingJobId = s.editingJobId;
+    document.getElementById('formTitle').textContent = s.formTitle;
+    document.getElementById('jobIdHeader').style.display = s.jobIdHeaderDisplay;
+    document.getElementById('jobIdHeader').textContent = s.jobIdHeaderText;
+
+    if (s.isEditMode) {
+        document.getElementById('formBackBtn').style.display = 'flex';
+        document.getElementById('formIcon').className = 'fas fa-edit';
+        document.getElementById('formIcon').style.color = 'var(--warning)';
+        updateClearCancelButton(true);
+    }
+
+    savedFormState = null;
+}
+
 document.addEventListener('visibilitychange', function() {
+    if (document.visibilityState === 'hidden') {
+        saveFormState();
+    }
     if (document.visibilityState === 'visible' && currentUser) {
+        // Check session first before doing anything else
+        if (isTokenExpired()) {
+            handleSessionExpired();
+            return;
+        }
         // Small delay to let iOS Safari stabilize
         setTimeout(function() {
             initAllDropdowns();
+            // Restore form state after dropdowns are reinitialized
+            setTimeout(function() {
+                restoreFormState();
+            }, 50);
         }, 100);
     }
 });
