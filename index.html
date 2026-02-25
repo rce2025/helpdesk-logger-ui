@@ -7433,12 +7433,45 @@ async function saveCase(event) {
     const commonFields = ['channel', 'source', 'contactPerson', 'telNo', 'agentCode', 'caseType', 'category', 'subcategory', 'subject', 'escalateTicket', 'actionResult'];
 
     try {
+        // For editing, we know the jobId upfront; for new cases, we need to determine related cases
+        // For follow-ups (isNewJob === 'N'), we can find related cases before save using originalJobId
+        let syncRelatedData = null;
+        const commonFieldValues = {};
+
+        // Determine related cases that need syncing
+        // For editing: rootJobId is known
+        // For new follow-ups: originalJobId is known
+        // For new root cases: no related cases exist yet
+        const preKnownRootJobId = editingId ? (isNewJob === 'Y' ? existingJobId : originalJobId) : (isNewJob === 'N' ? originalJobId : null);
+
+        if (preKnownRootJobId) {
+            const serverJobIdForFilter = editingId ? existingJobId : null;
+            const relatedCases = cases.filter(c => (c.followUpJobId === preKnownRootJobId || c.jobId === preKnownRootJobId) && c.jobId !== serverJobIdForFilter);
+
+            if (relatedCases.length > 0) {
+                commonFields.forEach(field => {
+                    if (field === 'escalateTicket') {
+                        commonFieldValues[field] = escalateVal;
+                    } else if (field === 'channel') {
+                        commonFieldValues[field] = channelVal;
+                    } else if (field === 'agentCode') {
+                        commonFieldValues[field] = document.getElementById('agentCode').value.toUpperCase();
+                    } else {
+                        commonFieldValues[field] = caseData[field];
+                    }
+                });
+
+                const relatedJobIds = relatedCases.map(c => c.jobId);
+                syncRelatedData = { jobIds: relatedJobIds, fields: commonFieldValues };
+                // Attach sync data to caseData so backend handles it in same execution
+                caseData.syncRelated = syncRelatedData;
+            }
+        }
+
         let result;
         if (editingId) {
-            // Update existing case
             result = await apiPost('updateCase', caseData, { worksheet: currentUser.worksheet });
         } else {
-            // Add new case
             result = await apiPost('addCase', caseData, { worksheet: currentUser.worksheet });
         }
 
@@ -7449,33 +7482,12 @@ async function saveCase(event) {
             return;
         }
 
-        // Get the server-generated jobId for new cases
         const serverJobId = editingId ? existingJobId : result.jobId;
 
-        // Sync common fields to all related cases (for follow-ups or when editing a case with follow-ups)
-        // For new root cases, rootJobId equals serverJobId; for follow-ups, use originalJobId
-        const rootJobId = (isNewJob === 'Y') ? serverJobId : originalJobId;
-        const relatedCases = cases.filter(c => (c.followUpJobId === rootJobId || c.jobId === rootJobId) && c.jobId !== serverJobId);
-
-        if (relatedCases.length > 0) {
-            // Prepare common field values to sync
-            const commonFieldValues = {};
-            commonFields.forEach(field => {
-                if (field === 'escalateTicket') {
-                    commonFieldValues[field] = escalateVal;
-                } else if (field === 'channel') {
-                    commonFieldValues[field] = channelVal;
-                } else if (field === 'agentCode') {
-                    commonFieldValues[field] = document.getElementById('agentCode').value.toUpperCase();
-                } else {
-                    commonFieldValues[field] = caseData[field];
-                }
-            });
-
-            // Batch sync all related cases in one API call
-            const relatedJobIds = relatedCases.map(c => c.jobId);
-            await apiPost('batchSyncCases', { jobIds: relatedJobIds, fields: commonFieldValues }, { worksheet: currentUser.worksheet });
-            // Update all related cases in memory
+        // Update related cases in memory (API sync already done by backend)
+        if (syncRelatedData) {
+            const rootJobId = preKnownRootJobId;
+            const relatedCases = cases.filter(c => (c.followUpJobId === rootJobId || c.jobId === rootJobId) && c.jobId !== serverJobId);
             relatedCases.forEach(rc => updateCaseInMemory(rc.jobId, commonFieldValues, true));
             if (isAdmin) buildAdminSummaryFromCases();
         }
