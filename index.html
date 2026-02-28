@@ -3303,6 +3303,10 @@ let WORKSHEETS = [];
 // Loading state
 let isLoading = false;
 
+// Login flow flag - when true, auth errors in API calls are thrown as normal errors
+// instead of triggering the Session Expired overlay
+var isLoginFlow = false;
+
 // Dropdown options constants - defined here to ensure consistent ordering across the app
 const CASE_TYPES = ["Service", "Incident", "Enquiry"];
 const CATEGORIES = ["Business Usage / Training", "Infra / Device", "User Login / Authentication", "Application Functionality / Data Issue", "Staff Service Requests", "Non-Helpdesk Requests"];
@@ -3513,9 +3517,25 @@ async function handleGoogleSignIn(response) {
         tokenExpiresAt = (payload.exp || 0) * 1000;
 
         // Now load users and worksheets from API (token is required)
+        // Set login flow flag so auth errors show as login errors, not "Session Expired"
+        isLoginFlow = true;
         showLoadingOverlay('Verifying access...');
-        await loadUsersFromAPI();
-        await loadWorksheetsFromAPI();
+        try {
+            await loadUsersFromAPI();
+            await loadWorksheetsFromAPI();
+        } catch (loginErr) {
+            isLoginFlow = false;
+            hideLoadingOverlay();
+            googleCredential = null;
+            tokenExpiresAt = 0;
+            if (loginErr.message === 'AUTH_ERROR') {
+                showLoginError('Access denied. Your Google account (' + email + ') is not authorized to use the Helpdesk Logger. Please contact the administrator.');
+            } else {
+                showLoginError('Failed to connect to the server. Please try again.');
+            }
+            return;
+        }
+        isLoginFlow = false;
         initAllDropdowns();
         hideLoadingOverlay();
 
@@ -3614,18 +3634,23 @@ async function apiGet(action, params = {}, options = {}) {
         // Check for non-JSON responses (Google auth redirect)
         var contentType = response.headers.get('content-type') || '';
         if (!contentType.includes('application/json') && !contentType.includes('text/javascript')) {
-            // Likely redirected to Google login page
-            handleSessionExpired();
-            throw new Error('Session expired');
+            if (!isLoginFlow) {
+                handleSessionExpired();
+            }
+            throw new Error(isLoginFlow ? 'AUTH_ERROR' : 'Session expired');
         }
         var result = await response.json();
         if (result && result.error === 'Token expired') {
-            handleSessionExpired();
-            throw new Error('Session expired');
+            if (!isLoginFlow) {
+                handleSessionExpired();
+            }
+            throw new Error(isLoginFlow ? 'AUTH_ERROR' : 'Session expired');
         }
         if (result && result.error && (result.error.toLowerCase().includes('authorization') || result.error.toLowerCase().includes('auth') || result.error.toLowerCase().includes('permission') || result.error.toLowerCase().includes('login'))) {
-            handleSessionExpired();
-            throw new Error('Session expired');
+            if (!isLoginFlow) {
+                handleSessionExpired();
+            }
+            throw new Error(isLoginFlow ? 'AUTH_ERROR' : 'Session expired');
         }
         return result;
     } catch (err) {
@@ -3661,17 +3686,23 @@ async function apiPost(action, data, params = {}, options = {}) {
         // Check for non-JSON responses (Google auth redirect)
         var contentType = response.headers.get('content-type') || '';
         if (!contentType.includes('application/json') && !contentType.includes('text/javascript')) {
-            handleSessionExpired();
-            throw new Error('Session expired');
+            if (!isLoginFlow) {
+                handleSessionExpired();
+            }
+            throw new Error(isLoginFlow ? 'AUTH_ERROR' : 'Session expired');
         }
         var result = await response.json();
         if (result && result.error === 'Token expired') {
-            handleSessionExpired();
-            throw new Error('Session expired');
+            if (!isLoginFlow) {
+                handleSessionExpired();
+            }
+            throw new Error(isLoginFlow ? 'AUTH_ERROR' : 'Session expired');
         }
         if (result && result.error && (result.error.toLowerCase().includes('authorization') || result.error.toLowerCase().includes('auth') || result.error.toLowerCase().includes('permission') || result.error.toLowerCase().includes('login'))) {
-            handleSessionExpired();
-            throw new Error('Session expired');
+            if (!isLoginFlow) {
+                handleSessionExpired();
+            }
+            throw new Error(isLoginFlow ? 'AUTH_ERROR' : 'Session expired');
         }
         return result;
     } catch (err) {
@@ -3771,15 +3802,20 @@ async function loadUsersFromAPI(retryCount = 0) {
             USERS = result.users;
         } else {
             console.error('Failed to load users:', result.error);
-            showToast('Failed to load users: ' + result.error, 'error');
+            if (!isLoginFlow) showToast('Failed to load users: ' + result.error, 'error');
         }
     } catch (error) {
+        // During login flow, bubble up auth errors immediately (don't retry)
+        if (isLoginFlow && error.message === 'AUTH_ERROR') {
+            throw error;
+        }
         // Retry once on network failure (common in iframe environments)
         if (retryCount < 1) {
             await new Promise(r => setTimeout(r, 500));
             return loadUsersFromAPI(retryCount + 1);
         }
         console.error('API error loading users:', error);
+        if (isLoginFlow) throw error;
         showToast('Failed to connect to server', 'error');
     }
 }
@@ -3793,12 +3829,17 @@ async function loadWorksheetsFromAPI(retryCount = 0) {
             console.error('Failed to load worksheets:', result.error);
         }
     } catch (error) {
+        // During login flow, bubble up auth errors immediately (don't retry)
+        if (isLoginFlow && error.message === 'AUTH_ERROR') {
+            throw error;
+        }
         // Retry once on network failure (common in iframe environments)
         if (retryCount < 1) {
             await new Promise(r => setTimeout(r, 500));
             return loadWorksheetsFromAPI(retryCount + 1);
         }
         console.error('API error loading worksheets:', error);
+        if (isLoginFlow) throw error;
     }
 }
 
